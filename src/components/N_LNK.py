@@ -1,6 +1,4 @@
-
-from math import erf
-
+from scipy.special import erf
 
 def main(x, a, b1, b2, kappa, ka):
     """
