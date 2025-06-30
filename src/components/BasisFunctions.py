@@ -2,11 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # 基底関数を定義するモジュール　式13
-def main(t, j, tau=1.0):
-    if 0<= t<= tau:
-        return np.sin(np.pi * j * ( 2 * t / tau - ( t /tau )**2))
-    else:
-        return 0.0
+def main(t, j, tau):
+    t = np.asarray(t)  # 入力をnumpy配列に変換
+    f_x = np.zeros_like(t, dtype=float)  # 出力配列の初期化
+
+    mask = (0 <= t) & (t <= tau)
+    f_x[mask] = np.sin(np.pi * j * (2 * t[mask] / tau - (t[mask] / tau) ** 2))
+
+    return f_x
 
 if __name__ == "__main__":
     t = 0.5
