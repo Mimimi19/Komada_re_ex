@@ -25,6 +25,11 @@ def load_config(filepath):
         config = yaml.safe_load(file)
     return config
 
+# 実験結果の保存
+def save_results(result, filepath):
+    with open(filepath, 'w', encoding='utf-8') as file:
+        file.write(str([result]) + '\n')
+
 # 目的関数定義
 def LNK_model(x):
     #ハイパーパラメータの設定
@@ -78,7 +83,8 @@ def LNK_model(x):
     Result = np.array([])
     
     #Linear Filter
-    for i in range(800):
+    print("Linear Filterの計算を開始します")
+    for i in tqdm(range(800)):
         #初期化
         keep_sin_wave = 0
         for j in range(tau):
@@ -92,23 +98,23 @@ def LNK_model(x):
     tild_g = np.convolve(Input, tild_Linear_Filter, mode='full')
     #チルダgの作成
     #入力刺激とチルダgの分散を求める
-    for i in range(80000):
+    for i in tqdm(range(80000)):
         tild_g[i] = dt * tild_g[i]
         Record1 = Record1 + (tild_g[i] * tild_g[i]) * dt
         Record2 = Record2 + (Input[i] * Input[i]) * dt
     #スケーリング係数を求める
     scale_Linear = math.sqrt(Record1 / Record2)
     #スケーリング
-    for i in range(800):
+    for i in tqdm(range(800)):
         keep_linear = tild_Linear_Filter[i] / scale_Linear
         Linear_Filter = np.append(Linear_Filter, keep_linear)
-    
-    for i in range(80000):
+
+    for i in tqdm(range(80000)):
         keep_g = tild_g[i] / scale_Linear
         g = np.append(g, keep_g)
     
     #Nonlinearモデル
-    for i in range(80000):
+    for i in tqdm(range(80000)):
         #非線形性の計算
         Nonlinear_output = N_LNK.main(g[i], x[16], x[17], x[18])
         U_Nonlinear = np.append(U_Nonlinear, Nonlinear_output)
@@ -121,8 +127,44 @@ def LNK_model(x):
     
     #4状態の計算
     R_state, A_state, I1_state, I2_state ,check= K_LNK.main(80000, U_Nonlinear, dt, keep_R, keep_A, keep_I, 0.0, x[19], x[20], x[21], 0.0, 0.0)
-    #評価の準備
-    Result = np.array([])
+    
+    #スピアマンによる評価
+    if check == 1:
+        for i in tqdm(range(80000)):
+            keep_Post = (-1) * A_state[i]
+            Result = np.append(Result, keep_Post)
+        
+        correlation, pvalue = spearmanr(Output, Result)
+        
+        # パラメータの保存
+        save_results(x[0], 'results/L1.txt')
+        save_results(x[1], 'results/L2.txt')
+        save_results(x[2], 'results/L3.txt')
+        save_results(x[3], 'results/L4.txt')
+        save_results(x[4], 'results/L5.txt')
+        save_results(x[5], 'results/L6.txt')
+        save_results(x[6], 'results/L7.txt')
+        save_results(x[7], 'results/L8.txt')
+        save_results(x[8], 'results/L9.txt')
+        save_results(x[9], 'results/L10.txt')
+        save_results(x[10], 'results/L11.txt')
+        save_results(x[11], 'results/L12.txt')
+        save_results(x[12], 'results/L13.txt')
+        save_results(x[13], 'results/L14.txt')
+        save_results(x[14], 'results/L15.txt')
+        save_results(x[15], 'results/delta.txt')
+        save_results(x[16], 'results/a.txt')
+        save_results(x[17], 'results/b1.txt')
+        save_results(x[18], 'results/b2.txt')
+        save_results(x[19], 'results/ka.txt')
+        save_results(x[20], 'results/kfi.txt')
+        save_results(x[21], 'results/kfr.txt')
+        save_results(correlation, 'results/correlation.txt')
+
+        correlation = (-1) * correlation
+    else:
+        correlation = 1000.0
+    Result = correlation
 
 def main(Try_bounds):
     #差分進化法
