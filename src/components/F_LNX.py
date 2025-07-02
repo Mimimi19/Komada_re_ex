@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import BasisFunctions as BasisFunctions
+import components.BasisFunctions as BasisFunctions
 
 
-def main(alphas, delta, dt, j=15):
+def main(alphas, delta, dt, tau, j, J):
     """
     FLNKフィルターカーネルを生成します（式12）。
     alphas: 各基底関数の重み係数リスト
@@ -12,16 +12,15 @@ def main(alphas, delta, dt, j=15):
     dt: タイムステップ (s)
     j: 使用する基底関数の数
     """
-    tau = 1.0 # τ の値を1.0に設定
 
-    t_values = np.arange(-delta, tau, dt)
+    t_values = np.arange(delta, tau, dt)
 
     # FLNKフィルターカーネルの生成
     kernel = np.zeros_like(t_values)  # カーネルの初期化
 
-    for i in range(j):
+    for j in range(J):
         shifted_t = t_values + delta  # 遅延補正
-        kernel += alphas[i] * BasisFunctions.main(shifted_t, i + 1, tau)
+        kernel += alphas[j] * BasisFunctions.main(shifted_t, j + 1, tau)
     # 畳み込みようにフィルターを反転
     return kernel[::-1], t_values[::-1]
 
