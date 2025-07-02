@@ -1,0 +1,16 @@
+# ハイパーパラメータの設定
+
+# 刻み幅
+dt: 0.20000000
+
+#Linear Filterのパラメータ
+j: 15
+tau: 30
+
+# Nonlinear Filterのパラメータ
+b2: 1.0
+
+# 初期値設定のための初期値
+R_start: 0.842
+A_start: 0.157
+I_start: 0.001
