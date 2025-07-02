@@ -1,4 +1,5 @@
-
+# coding: utf-8
+from tqdm import tqdm
 import pprint
 import math
 import numpy as np
@@ -117,7 +118,9 @@ def LNK_model(x):
     keep_R = R_start
     keep_A = A_start
     keep_I = I_start
-
+    
+    #4状態の計算
+    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(80000, U_Nonlinear, dt, keep_R, keep_A, keep_I, 0.0, x[19], x[20], x[21], 0.0, 0.0)
     #評価の準備
     Result = np.array([])
 
