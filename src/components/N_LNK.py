@@ -22,3 +22,6 @@ if __name__ == "__main__":
     a = 1.0
     b1 = 0.0
     b2 = 0.0
+    g_test = np.array([0.5, 1.0, -0.5])
+    output_test = main(g_test, a, b1, b2)
+    print(f"Test output for N_LNK: {output_test}")
