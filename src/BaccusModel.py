@@ -6,15 +6,17 @@ import numpy as np
 from scipy.stats import spearmanr
 from scipy.optimize import differential_evolution
 import yaml
+import os
 
 import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
 # 提供データのインプット
-# cb1
-# Output = np.genfromtxt("components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+#cb1データ
 Input = np.genfromtxt("components/Provided_Data/cb1/wn_0.0002s.txt")
+Output = np.genfromtxt("components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+
 # cb2
 # Output = np.genfromtxt("components/Provided_Data/cb2/cb2_Fourier_Result.txt")
 # Input = np.genfromtxt("components/Provided_Data/cb2/wn.txt")
@@ -27,13 +29,14 @@ def load_config(filepath):
 
 # 実験結果の保存
 def save_results(result, filepath):
-    with open(filepath, 'w', encoding='utf-8') as file:
-        file.write(str([result]) + '\n')
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, 'a', encoding='utf-8') as file:
+        file.write(str(result) + '\n') # Save scalar directly, or list if it's a list
 
 # 目的関数定義
 def LNK_model(x):
     #ハイパーパラメータの設定
-    config_file_path = 'src/components/config/Baccus.yaml'
+    config_file_path = 'components/config/Baccus.yaml'
     # 設定ファイルからパラメータを取得
     try:
         # 設定を読み込む
@@ -44,127 +47,131 @@ def LNK_model(x):
             #初期値設定のための初期値
             R_start = config['R_start']
             A_start = config['A_start']
-            I_start = config['I_start']
+            I1_start = config['I_start'] # Assuming I_start corresponds to I1_start
+            I2_start = 0.0 # Assuming I2_start is 0.0 as it's not in config
             
             tau = config['tau']
             #基底関数の数
-            J = config['j']
+            J = config['J'] # 基底関数の数 (J)
         except KeyError as e:
             print(f"設定ファイルに必要なキーがありません: {e}")
-            return np.inf
+            raise
     except FileNotFoundError:
         print(f"エラー: '{config_file_path}' が見つかりません。")
+        raise
     except yaml.YAMLError as exc:
         print(f"YAMLファイルのパースエラー: {exc}")
+        raise
     except KeyError as e:
         print(f"設定ファイルに予期せぬキーがありません: {e}")
+        raise
    
+    # 線形フィルタパラメータ (x[0]からx[J-1])
+    # x[J] は delta
+    # x[J+1]からx[J+3-1] は 非線形パラメータ (a, b1, b2)
+    # x[J+3]からx[J+3+3-1] は 動的パラメータ (ka, kfi, kfr)
+    
+    alphas = x[0:J] # x[0]からx[J-1]までのJ個のパラメータ
+    delta = x[J] # x[J]
+    a_nonlinear = x[J+1] # x[J+1]
+    b1_nonlinear = x[J+2] # x[J+2]
+    b2_nonlinear = x[J+3] # x[J+3]
+    ka_kinetic = x[J+4] # x[J+4]
+    kfi_kinetic = x[J+5] # x[J+5]
+    kfr_kinetic = x[J+6] # x[J+6]
+
+    # ksiとksrは現在定数として扱われている
+    ksi_kinetic = 0.0
+    ksr_kinetic = 0.0
+
     #Linear Filterについて
-    tild_Linear_Filter = np.array([])
-    Linear_Filter = np.array([])
-    
-    #線形フィルタに通した出力結果
-    tild_g = np.array([])
-    g = np.array([])
-    
-    #線形フィルタにおけるスケーリング定数を求めるためのパラメータ
+    # F_LNX.mainの戻り値は、線形フィルターカーネル全体と時間軸
+    Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
+
+    #畳み込みでチルダgの作成
+    # mode='full'の場合、出力は len(Input) + len(Linear_Filter_kernel) - 1 の長さになる
+    # モデルの出力長を合わせるために、適切なスライスが必要になる場合がある
+    tild_g_full = np.convolve(Input, Linear_Filter_kernel, mode='full')
+
+    # モデルの時間ステップ数に合わせるため、入力信号の長さに合わせる
+    # ここでは、Inputの長さ (80000) に合わせる
+    g_len = len(Input)
+    tild_g = tild_g_full[:g_len] # 適切な長さにスライス
+
+    #スケーリング定数を求めるためのパラメータ
     Record1 = 0
     Record2 = 0
     
-    #Nonlinearの出力結果を格納するための配列の作成
-    U_Nonlinear = np.array([])
-    
-    #3状態を格納する配列
-    R_state = np.array([])
-    A_state = np.array([])
-    I_state = np.array([])
-    
-    #評価の準備
-    Result = np.array([])
-    
-    #Linear Filter
-    print("Linear Filterの計算を開始します")
-    for i in tqdm(range(800)):
-        #初期化
-        keep_sin_wave = 0
-        for j in range(tau):
-            #基底関数の計算
-            keep_sin_wave += F_LNX.main(x[j-J],i*0.2,dt, tau, j + 1, J)[i]
-        
-    #チルダFの作成
-    tild_Linear_Filter = np.append(tild_Linear_Filter, keep_sin_wave)
-        
-    #畳み込みでチルダgの作成
-    tild_g = np.convolve(Input, tild_Linear_Filter, mode='full')
-    #チルダgの作成
-    #入力刺激とチルダgの分散を求める
-    for i in tqdm(range(80000)):
-        tild_g[i] = dt * tild_g[i]
-        Record1 = Record1 + (tild_g[i] * tild_g[i]) * dt
-        Record2 = Record2 + (Input[i] * Input[i]) * dt
-    #スケーリング係数を求める
-    scale_Linear = math.sqrt(Record1 / Record2)
-    #スケーリング
-    for i in tqdm(range(800)):
-        keep_linear = tild_Linear_Filter[i] / scale_Linear
-        Linear_Filter = np.append(Linear_Filter, keep_linear)
+    #チルダgの計算（スケーリング前）
+    # Inputとtild_gは同じ長さである必要がある
+    if len(tild_g) != len(Input):
+        print(f"Error: Length of tild_g ({len(tild_g)}) does not match length of Input ({len(Input)}) for scaling.")
+        raise
 
-    for i in tqdm(range(80000)):
-        keep_g = tild_g[i] / scale_Linear
-        g = np.append(g, keep_g)
+    # 入力刺激とチルダgの分散を求める
+    # dtは合計の計算で考慮される
+    Record1 = np.sum(tild_g * tild_g) * dt
+    Record2 = np.sum(Input * Input) * dt
+    
+    #スケーリング係数を求める
+    if Record2 == 0:
+        print("Error: Record2 is zero, cannot calculate scale_Linear. Input might be all zeros.")
+        raise
+    scale_Linear = math.sqrt(Record1 / Record2)
+    
+    #スケーリング
+    g = tild_g / scale_Linear
     
     #Nonlinearモデル
-    for i in tqdm(range(80000)):
-        #非線形性の計算
-        Nonlinear_output = N_LNK.main(g[i], x[16], x[17], x[18])
-        U_Nonlinear = np.append(U_Nonlinear, Nonlinear_output)
+    print("Nonlinearモデルの計算を開始します")
+    U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g)])
         
     #Kineticモデル
-    #初期値の入力
-    keep_R = R_start
-    keep_A = A_start
-    keep_I = I_start
-    
-    #4状態の計算
-    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(80000, U_Nonlinear, dt, keep_R, keep_A, keep_I, 0.0, x[19], x[20], x[21], 0.0, 0.0)
+    print("Kineticモデルの計算を開始します")
+    # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
+    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic)
     
     #スピアマンによる評価
+    correlation = 1000.0 # デフォルトで大きな値を設定
     if check == 1:
-        for i in tqdm(range(80000)):
-            keep_Post = (-1) * A_state[i]
-            Result = np.append(Result, keep_Post)
+        print("スピアマン相関の計算を開始します")
+        # OutputとResultの長さを合わせる必要がある
+        # A_stateはU_Nonlinearと同じ長さになるはず
+        keep_Post = (-1) * A_state[:len(Output)] # Outputの長さに合わせる
         
-        correlation, pvalue = spearmanr(Output, Result)
+        # Outputとkeep_Postの長さを確認
+        if len(Output) != len(keep_Post):
+            print(f"Warning: Length of Output ({len(Output)}) and calculated Post-synaptic potential ({len(keep_Post)}) do not match.")
+            # For correlation calculation, trim to the shorter length
+            min_len = min(len(Output), len(keep_Post))
+            Output_trimmed = Output[:min_len]
+            keep_Post_trimmed = keep_Post[:min_len]
+            correlation, pvalue = spearmanr(Output_trimmed, keep_Post_trimmed)
+        else:
+            correlation, pvalue = spearmanr(Output, keep_Post)
         
         # パラメータの保存
-        save_results(x[0], 'results/L1.txt')
-        save_results(x[1], 'results/L2.txt')
-        save_results(x[2], 'results/L3.txt')
-        save_results(x[3], 'results/L4.txt')
-        save_results(x[4], 'results/L5.txt')
-        save_results(x[5], 'results/L6.txt')
-        save_results(x[6], 'results/L7.txt')
-        save_results(x[7], 'results/L8.txt')
-        save_results(x[8], 'results/L9.txt')
-        save_results(x[9], 'results/L10.txt')
-        save_results(x[10], 'results/L11.txt')
-        save_results(x[11], 'results/L12.txt')
-        save_results(x[12], 'results/L13.txt')
-        save_results(x[13], 'results/L14.txt')
-        save_results(x[14], 'results/L15.txt')
-        save_results(x[15], 'results/delta.txt')
-        save_results(x[16], 'results/a.txt')
-        save_results(x[17], 'results/b1.txt')
-        save_results(x[18], 'results/b2.txt')
-        save_results(x[19], 'results/ka.txt')
-        save_results(x[20], 'results/kfi.txt')
-        save_results(x[21], 'results/kfr.txt')
-        save_results(correlation, 'results/correlation.txt')
+        # resultsディレクトリが存在することを確認
+        results_dir = 'results'
+        os.makedirs(results_dir, exist_ok=True)
 
-        correlation = (-1) * correlation
+        for i in range(J):
+            save_results(x[i], f'{results_dir}/L{i+1}.txt')
+        save_results(x[J], f'{results_dir}/delta.txt')
+        save_results(x[J+1], f'{results_dir}/a.txt')
+        save_results(x[J+2], f'{results_dir}/b1.txt')
+        save_results(x[J+3], f'{results_dir}/b2.txt')
+        save_results(x[J+4], f'{results_dir}/ka.txt')
+        save_results(x[J+5], f'{results_dir}/kfi.txt')
+        save_results(x[J+6], f'{results_dir}/kfr.txt')
+        save_results(correlation, f'{results_dir}/correlation.txt')
+
+        correlation = (-1) * correlation # 最小化問題のため相関の負の値を返す
     else:
-        correlation = 1000.0
-    Result = correlation
+        print("Kinetic model check failed. Returning large correlation value.")
+        correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
+
+    return correlation
 
 def main(Try_bounds):
     #差分進化法
@@ -173,12 +180,33 @@ def main(Try_bounds):
     #表示
     pprint.pprint(result)
     
-
-
-
 if __name__ == "__main__":
     #探索するパラメータの範囲
-    #左からlinarのシグマ15個, delta, 非線形パラメータ3個, 動的パラメータ3個
-    Try_bounds = [(0.5, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (-1, 1), (0.05, 0.2), (5, 6), (-1.5, -1), (-6, -5), (0.4, 0.6), (0.06, 0.1)]
-    main(Try_bounds)
+    #左からlinearのalphas 15個, delta, 非線形パラメータ3個 (a, b1, b2), 動的パラメータ3個 (ka, kfi, kfr)
+    # total parameters: 15 (alphas) + 1 (delta) + 3 (nonlinear) + 3 (kinetic) = 22 parameters
+    
+    # J = 15 alphas
+    # x[0] to x[14] for alphas
+    # x[15] for delta
+    # x[16] for a
+    # x[17] for b1
+    # x[18] for b2
+    # x[19] for ka
+    # x[20] for kfi
+    # x[21] for kfr
 
+    Try_bounds = [
+        (0.01, 1.0) for _ in range(15) # alphas (L1-L15)
+    ] + [
+        (0.05, 0.2), # delta
+        (0.1, 10.0), # a (nonlinear)
+        (-5.0, 5.0), # b1 (nonlinear)
+        (-10.0, 10.0),# b2 (nonlinear)
+        (0.01, 1.0), # ka (kinetic)
+        (0.01, 1.0), # kfi (kinetic)
+        (0.01, 1.0)  # kfr (kinetic)
+    ]
+    # Make sure the length of Try_bounds matches the number of parameters LNK_model expects
+    # J (15) + 1 (delta) + 3 (nonlinear) + 3 (kinetic) = 22
+    print(f"Number of parameters in Try_bounds: {len(Try_bounds)}")
+    main(Try_bounds)
