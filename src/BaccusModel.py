@@ -152,7 +152,7 @@ def LNK_model(x):
         
         # パラメータの保存
         # resultsディレクトリが存在することを確認
-        date_str = time.strftime("%Y%m%d")
+        date_str = time.strftime("%Y%m%d_%H")
         results_dir = f'../results/{date_str}'
         os.makedirs(results_dir, exist_ok=True)
         
