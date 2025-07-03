@@ -7,6 +7,7 @@ from scipy.stats import spearmanr
 from scipy.optimize import differential_evolution
 import yaml
 import os
+import time
 
 import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
@@ -31,8 +32,7 @@ def load_config(filepath):
 def save_results(result, filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'a', encoding='utf-8') as file:
-        file.write(str(result) + '\n') # Save scalar directly, or list if it's a list
-
+        file.write(str(result) + '\n')
 # 目的関数定義
 def LNK_model(x):
     #ハイパーパラメータの設定
@@ -152,10 +152,11 @@ def LNK_model(x):
         
         # パラメータの保存
         # resultsディレクトリが存在することを確認
-        results_dir = 'results'
+        date_str = time.strftime("%Y%m%d")
+        results_dir = f'results/{date_str}'
         os.makedirs(results_dir, exist_ok=True)
-
-        for i in range(J):
+        
+        for i in range(J):#線形フィルタのパラメータを保存
             save_results(x[i], f'{results_dir}/L{i+1}.txt')
         save_results(x[J], f'{results_dir}/delta.txt')
         save_results(x[J+1], f'{results_dir}/a.txt')
@@ -164,6 +165,10 @@ def LNK_model(x):
         save_results(x[J+4], f'{results_dir}/ka.txt')
         save_results(x[J+5], f'{results_dir}/kfi.txt')
         save_results(x[J+6], f'{results_dir}/kfr.txt')
+        save_results(R_state, f'{results_dir}/R_state.txt')
+        save_results(A_state, f'{results_dir}/A_state.txt')
+        save_results(I1_state, f'{results_dir}/I1_state.txt')
+        save_results(I2_state, f'{results_dir}/I2_state.txt')
         save_results(correlation, f'{results_dir}/correlation.txt')
 
         correlation = (-1) * correlation # 最小化問題のため相関の負の値を返す
