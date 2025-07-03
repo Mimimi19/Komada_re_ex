@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import components.BasisFunctions as BasisFunctions
 
 
-def main(alphas, delta, dt, tau, j, J):
+def main(alphas, delta, dt, tau, j, J=15):
     """
     FLNKフィルターカーネルを生成します（式12）。
     alphas: 各基底関数の重み係数リスト
@@ -25,12 +25,14 @@ def main(alphas, delta, dt, tau, j, J):
     return kernel[::-1], t_values[::-1]
 
 if __name__ == "__main__":
-    alphas = [0.1 * (i + 1) for i in range(15)] # 重み係数の例
+    alphas = [0.1 * (i + 1) for i in range(J)] # 重み係数の例
     delta = 0.5  # 遅延パラメータの例 (s)
     dt = 0.01   # タイムステップの例 (s)
     j = 15      # 使用する基底関数の数
+    J = 15      # 基底関数の総数
+    tau = 1.0   # タイムウィンドウの長さ (s)
 
-    kernel, t_axis = main(alphas, delta, dt)
+    kernel, t_axis = main(alphas, delta, dt, tau, j, J)
 
     plt.plot(t_axis, kernel[::-1])  # x軸に対応させるため反転戻す
     plt.title('FLNK Filter Kernel')
