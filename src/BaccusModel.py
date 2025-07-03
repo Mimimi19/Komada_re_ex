@@ -153,7 +153,7 @@ def LNK_model(x):
         # パラメータの保存
         # resultsディレクトリが存在することを確認
         date_str = time.strftime("%Y%m%d")
-        results_dir = f'results/{date_str}'
+        results_dir = f'../results/{date_str}'
         os.makedirs(results_dir, exist_ok=True)
         
         for i in range(J):#線形フィルタのパラメータを保存
@@ -165,13 +165,17 @@ def LNK_model(x):
         save_results(x[J+4], f'{results_dir}/ka.txt')
         save_results(x[J+5], f'{results_dir}/kfi.txt')
         save_results(x[J+6], f'{results_dir}/kfr.txt')
+        save_results(correlation, f'{results_dir}/correlation.txt')
+        # 状態の保存
+        results_dir = f'../results/state/{date_str}'
+        os.makedirs(results_dir, exist_ok=True)
         save_results(R_state, f'{results_dir}/R_state.txt')
         save_results(A_state, f'{results_dir}/A_state.txt')
         save_results(I1_state, f'{results_dir}/I1_state.txt')
         save_results(I2_state, f'{results_dir}/I2_state.txt')
-        save_results(correlation, f'{results_dir}/correlation.txt')
-
-        correlation = (-1) * correlation # 最小化問題のため相関の負の値を返す
+        
+        # 最小化問題のため相関の負の値を返す
+        correlation = (-1) * correlation 
     else:
         print("Kinetic model check failed. Returning large correlation value.")
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
