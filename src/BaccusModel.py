@@ -13,6 +13,11 @@ import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
+# グローバルカウンタ
+total_lnk_model_runs = 0
+failed_lnk_model_runs = 0
+date_str = time.strftime("%Y%m%d_%H")
+
 # 提供データのインプット
 #cb1データ
 Input = np.genfromtxt("/app/src/components/Provided_Data/cb1/wn_0.0002s.txt")
@@ -35,6 +40,10 @@ def save_results(result, filepath):
         file.write(str(result) + '\n')
 # 目的関数定義
 def LNK_model(x):
+    global total_lnk_model_runs
+    global failed_lnk_model_runs
+    global date_str
+    total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
     #ハイパーパラメータの設定
     config_file_path = '/app/src/components/config/Baccus.yaml'
     # 設定ファイルからパラメータを取得
@@ -123,18 +132,16 @@ def LNK_model(x):
     g = tild_g / scale_Linear
     
     #Nonlinearモデル
-    print("Nonlinearモデルの計算を開始します")
     U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g)])
         
     #Kineticモデル
-    print("Kineticモデルの計算を開始します")
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic)
     
     #スピアマンによる評価
     correlation = 1000.0 # デフォルトで大きな値を設定
     if check == 1:
-        print("スピアマン相関の計算を開始します")
+        print("Kinetic model が成功.")
         # OutputとResultの長さを合わせる必要がある
         # A_stateはU_Nonlinearと同じ長さになるはず
         keep_Post = (-1) * A_state[:len(Output)] # Outputの長さに合わせる
@@ -151,35 +158,46 @@ def LNK_model(x):
             correlation, pvalue = spearmanr(Output, keep_Post)
         
         # パラメータの保存
-        # resultsディレクトリが存在することを確認
-        date_str = time.strftime("%Y%m%d_%H")
-        results_dir = f'../results/Baccus/{date_str}'
-        os.makedirs(results_dir, exist_ok=True)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root_dir = os.path.dirname(script_dir) 
+        results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus')
+
+        # パラメータ用のディレクトリ
+        param_results_dir = os.path.join(results_base_dir, date_str)
+        os.makedirs(param_results_dir, exist_ok=True)
         
         for i in range(J):#線形フィルタのパラメータを保存
-            save_results(x[i], f'{results_dir}/L{i+1}.txt')
-        save_results(x[J], f'{results_dir}/delta.txt')
-        save_results(x[J+1], f'{results_dir}/a.txt')
-        save_results(x[J+2], f'{results_dir}/b1.txt')
-        save_results(x[J+3], f'{results_dir}/b2.txt')
-        save_results(x[J+4], f'{results_dir}/ka.txt')
-        save_results(x[J+5], f'{results_dir}/kfi.txt')
-        save_results(x[J+6], f'{results_dir}/kfr.txt')
-        save_results(correlation, f'{results_dir}/correlation.txt')
-        # 状態の保存
-        results_dir = f'../results/Baccus/state/{date_str}'
-        os.makedirs(results_dir, exist_ok=True)
-        save_results(R_state, f'{results_dir}/R_state.txt')
-        save_results(A_state, f'{results_dir}/A_state.txt')
-        save_results(I1_state, f'{results_dir}/I1_state.txt')
-        save_results(I2_state, f'{results_dir}/I2_state.txt')
+            save_results(x[i], os.path.join(param_results_dir, f'L{i+1}.txt'))
+        save_results(x[J], os.path.join(param_results_dir, 'delta.txt'))
+        save_results(x[J+1], os.path.join(param_results_dir, 'a.txt'))
+        save_results(x[J+2], os.path.join(param_results_dir, 'b1.txt'))
+        save_results(x[J+3], os.path.join(param_results_dir, 'b2.txt'))
+        save_results(x[J+4], os.path.join(param_results_dir, 'ka.txt'))
+        save_results(x[J+5], os.path.join(param_results_dir, 'kfi.txt'))
+        save_results(x[J+6], os.path.join(param_results_dir, 'kfr.txt'))
+        save_results(correlation, os.path.join(param_results_dir, 'correlation.txt'))
         
+        # 状態の保存
+        state_results_dir = os.path.join(results_base_dir, 'state', date_str) 
+        os.makedirs(state_results_dir, exist_ok=True)
+        save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
+        save_results(A_state, os.path.join(state_results_dir, 'A_state.txt'))
+        save_results(I1_state, os.path.join(state_results_dir, 'I1_state.txt'))
+        save_results(I2_state, os.path.join(state_results_dir, 'I2_state.txt'))
+
         # 最小化問題のため相関の負の値を返す
         correlation = (-1) * correlation 
     else:
-        print("Kinetic model check failed. Returning large correlation value.")
+        print("Kinetic model が失敗しました.")
+        failed_lnk_model_runs += 1 # Kineticモデルが失敗した場合は失敗としてマーク
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
-
+    # 結果の表示
+    print(f"相関係数: {correlation:.4f}")
+    if total_lnk_model_runs > 0:
+        failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
+        print(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
+    else:
+        print("実行記録がありません。")
     return correlation
 
 def main(Try_bounds):
