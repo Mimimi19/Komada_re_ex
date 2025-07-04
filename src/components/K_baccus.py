@@ -56,6 +56,13 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
         keep_I1 += (Runge1_I1 + 2 * Runge2_I1 + 2 * Runge3_I1 + Runge4_I1) / 6
         keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
         
+        # 状態のクリッピング
+        # 状態変数は0から1の範囲に制限する
+        keep_R = np.clip(keep_R, 0.0, 1.0)
+        keep_A = np.clip(keep_A, 0.0, 1.0)
+        keep_I1 = np.clip(keep_I1, 0.0, 1.0)
+        keep_I2 = np.clip(keep_I2, 0.0, 1.0)
+        
         # 3状態に異常がないかのチェック
         if not (0 <= keep_R <= 1 and 0 <= keep_A <= 1 and 0 <= keep_I1 <= 1 and 0 <= keep_I2 <= 1):
             check = 0
