@@ -141,7 +141,6 @@ def LNK_model(x):
     #スピアマンによる評価
     correlation = 1000.0 # デフォルトで大きな値を設定
     if check == 1:
-        print("Kinetic model が成功.")
         # OutputとResultの長さを合わせる必要がある
         # A_stateはU_Nonlinearと同じ長さになるはず
         keep_Post = (-1) * A_state[:len(Output)] # Outputの長さに合わせる
