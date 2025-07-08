@@ -35,6 +35,7 @@ def load_config(filepath):
 
 # 実験結果の保存
 def save_results(result, filepath):
+    print(f"結果を保存: {filepath}")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'a', encoding='utf-8') as file:
         file.write(str(result) + '\n')
@@ -95,6 +96,7 @@ def LNK_model(x):
 
     #Linear Filterについて
     # F_LNX.mainの戻り値は、線形フィルターカーネル全体と時間軸
+    print("線形フィルターの計算を開始します...")
     Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
 
     #畳み込みでチルダgの作成
@@ -132,12 +134,15 @@ def LNK_model(x):
     g = tild_g / scale_Linear
     
     #Nonlinearモデル
+    print("非線形モデルの計算を開始します...")
     U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g)])
         
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
+    print("Kineticモデルの計算を開始します...")
     R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic)
     
+    print("スピアマンの相関係数を計算します...")
     #スピアマンによる評価
     correlation = 1000.0 # デフォルトで大きな値を設定
     if check == 1:
