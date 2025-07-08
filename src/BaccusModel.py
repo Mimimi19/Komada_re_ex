@@ -217,7 +217,16 @@ def main(Try_bounds):
 
     #表示
     pprint.pprint(result)
-    
+    # パラメータの保存
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root_dir = os.path.dirname(script_dir) 
+    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus')
+
+    # パラメータ用のディレクトリ
+    param_results_dir = os.path.join(results_base_dir, date_str)
+    os.makedirs(param_results_dir, exist_ok=True)
+    save_results(result.x, os.path.join(param_results_dir, 'result.txt'))
+
 if __name__ == "__main__":
     #探索するパラメータの範囲
     #左からlinearのalphas 15個, delta, 非線形パラメータ3個 (a, b1, b2), 動的パラメータ3個 (ka, kfi, kfr)
