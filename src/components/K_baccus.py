@@ -1,5 +1,6 @@
 
 import numpy as np
+import tqdm
 
 def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
     # 状態変数の更新
@@ -39,7 +40,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     I2_state = np.array([keep_I2])
 
     #4状態の計算
-    for i in range(1, time_steps):
+    for i in tqdm.tqdm(range(1, time_steps)):
         # ルンゲ・クッタ法
         # 1段階目
         Runge1_R, Runge1_A, Runge1_I1, Runge1_I2 = dP(keep_R, keep_A, keep_I1, keep_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
@@ -63,12 +64,12 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
         keep_I1 = np.clip(keep_I1, 0.0, 1.0)
         keep_I2 = np.clip(keep_I2, 0.0, 1.0)
         
+        
         # 3状態に異常がないかのチェック
         if not (0 <= keep_R <= 1 and 0 <= keep_A <= 1 and 0 <= keep_I1 <= 1 and 0 <= keep_I2 <= 1):
             check = 0
             print(f"State out of bounds at step {i}: R={keep_R}, A={keep_A}, I1={keep_I1}, I2={keep_I2}")
             break
-            
         # 状態の保存
         R_state = np.append(R_state, keep_R)
         A_state = np.append(A_state, keep_A)
