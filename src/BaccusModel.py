@@ -226,7 +226,7 @@ def main(Try_bounds):
     # パラメータの保存
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root_dir = os.path.dirname(script_dir) 
-    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus'+ data_options)
+    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options)
 
     # パラメータ用のディレクトリ
     param_results_dir = os.path.join(results_base_dir, date_str)
