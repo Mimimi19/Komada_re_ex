@@ -17,15 +17,20 @@ import components.K_baccus as K_LNK
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
 date_str = time.strftime("%Y%m%d_%H")
+data_options =  "cb1"
+# data_options =  "cb2"
 
 # 提供データのインプット
-#cb1データ
-Input = np.genfromtxt("/app/src/components/Provided_Data/cb1/wn_0.0002s.txt")
-Output = np.genfromtxt("/app/src/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
-
-# cb2
-# Output = np.genfromtxt("/app/src/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
-# Input = np.genfromtxt("/app/src/components/Provided_Data/cb2/wn.txt")
+if data_options == "cb1":
+    print("cb1のデータを使用します")
+    #cb1データ
+    Input = np.genfromtxt("/app/src/components/Provided_Data/cb1/wn_0.0002s.txt")
+    Output = np.genfromtxt("/app/src/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+elif data_options == "cb2":
+    print("cb2のデータを使用します")
+    #cb2データ
+    Input = np.genfromtxt("/app/src/components/Provided_Data/cb2/wn.txt")
+    Output = np.genfromtxt("/app/src/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
 
 # 設定ファイルの読み込み
 def load_config(filepath):
@@ -44,6 +49,7 @@ def LNK_model(x):
     global total_lnk_model_runs
     global failed_lnk_model_runs
     global date_str
+    global data_options
     total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
     #ハイパーパラメータの設定
     config_file_path = '/app/src/components/config/Baccus.yaml'
@@ -164,7 +170,7 @@ def LNK_model(x):
         # パラメータの保存
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root_dir = os.path.dirname(script_dir) 
-        results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus')
+        results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus'+ data_options)
 
         # パラメータ用のディレクトリ
         param_results_dir = os.path.join(results_base_dir, date_str)
