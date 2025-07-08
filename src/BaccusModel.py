@@ -17,10 +17,10 @@ import components.K_baccus as K_LNK
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
 date_str = time.strftime("%Y%m%d_%H")
-data_options =  "cb1"
-# data_options =  "cb2"
 
 # 提供データのインプット
+data_options =  "cb1"
+# data_options =  "cb2"
 if data_options == "cb1":
     print("cb1のデータを使用します")
     #cb1データ
@@ -226,7 +226,7 @@ def main(Try_bounds):
     # パラメータの保存
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root_dir = os.path.dirname(script_dir) 
-    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus')
+    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus'+ data_options)
 
     # パラメータ用のディレクトリ
     param_results_dir = os.path.join(results_base_dir, date_str)
