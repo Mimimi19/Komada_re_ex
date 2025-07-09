@@ -68,7 +68,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
         # 3状態に異常がないかのチェック
         if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
             check = 0
-            print(f"State out of bounds at step {i}: R={keep_R}, A={keep_A}, I1={keep_I1}, I2={keep_I2}")
+            # print(f"State out of bounds at step {i}: R={keep_R}, A={keep_A}, I1={keep_I1}, I2={keep_I2}")
             break
         # 状態の保存
         R_state = np.append(R_state, keep_R)
