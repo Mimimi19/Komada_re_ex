@@ -190,7 +190,7 @@ def LNK_model(x, save_states=False):
         # 最小化問題のため相関の負の値を返す
         correlation = (-1) * correlation 
     else:
-        print("Kinetic model が失敗しました.")
+        # print("Kinetic model が失敗しました.")
         failed_lnk_model_runs += 1 # Kineticモデルが失敗した場合は失敗としてマーク
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
     # 結果の表示
@@ -199,7 +199,7 @@ def LNK_model(x, save_states=False):
     if total_lnk_model_runs % 100 == 0 or total_lnk_model_runs == 1:
         if total_lnk_model_runs > 0:
             current_failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
-            tqdm.write(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({current_failure_rate:.2f}%)")
+            # tqdm.write(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({current_failure_rate:.2f}%)")
         else:
             tqdm.write("実行記録がありません。")
             
