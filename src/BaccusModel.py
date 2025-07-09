@@ -16,9 +16,12 @@ import components.K_baccus as K_LNK
 # グローバルカウンタ
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
+failed_lnk_model_runs = 0 
+total_lnk_model_runs = 0 
+failure_rate = 0.0
 date_str = time.strftime("%Y%m%d_%H")
-local = 0 # ローカルでのテスト用
-# local = 1 # ワーキングステーション用
+local = 1 # ローカルでのテスト用
+# local = 0 # ワーキングステーション用
 
 # 提供データのインプット
 data_options =  "cb1"
@@ -28,8 +31,8 @@ if data_options == "cb1":
     #cb1データ
     if local == 1:
         # ローカルでのテスト用
-        Input = np.genfromtxt("app/components/Provided_Data/cb1/wn_0.0002s.txt")
-        Output = np.genfromtxt("app/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+        Input = np.genfromtxt("src/components/Provided_Data/cb1/wn_0.0002s.txt")
+        Output = np.genfromtxt("src/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
     elif local == 0:
         # ワーキングステーション用
         Input = np.genfromtxt("./components/Provided_Data/cb1/wn_0.0002s.txt")
@@ -39,8 +42,8 @@ elif data_options == "cb2":
     #cb2データ
     if local == 1:
         # ローカルでのテスト用
-        Input = np.genfromtxt("app/components/Provided_Data/cb2/wn_0.0002s.txt")
-        Output = np.genfromtxt("app/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
+        Input = np.genfromtxt("src/components/Provided_Data/cb2/wn_0.0002s.txt")
+        Output = np.genfromtxt("src/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
     elif local == 0:
         # ワーキングステーション用
         Input = np.genfromtxt("./components/Provided_Data/cb2/wn_0.0002s.txt")
@@ -62,13 +65,16 @@ def save_results(result, filepath):
 def LNK_model(x):
     global total_lnk_model_runs
     global failed_lnk_model_runs
+    global total_lnk_model_runs
+    global failure_rate
     global date_str
     global data_options
+
     total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
     #ハイパーパラメータの設定
     if local == 1:
         # ローカルでのテスト用
-        config_file_path = '/app/src/components/config/Baccus.yaml'
+        config_file_path = 'src/components/config/Baccus.yaml'
     elif local == 0:
         # ワーキングステーション用
         config_file_path = './components/config/Baccus.yaml'
@@ -160,13 +166,13 @@ def LNK_model(x):
     
     #Nonlinearモデル
     # print("非線形モデルの計算を開始します...")
-    U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g)])
+    U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g, leave=False, desc="N_Model")])
         
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     # print("Kineticモデルの計算を開始します...")
-    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic)
-    
+    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, label = f"失敗/実行回数(失敗率):{failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
+
     # print("スピアマンの相関係数を計算します...")
     #スピアマンによる評価
     correlation = 1000.0 # デフォルトで大きな値を設定
@@ -224,7 +230,7 @@ def LNK_model(x):
     # print(f"相関係数: {correlation:.4f}")
     if total_lnk_model_runs > 0:
         failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
-        print(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
+        # print(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
     else:
         print("実行記録がありません。")
     return correlation
