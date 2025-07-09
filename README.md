@@ -11,7 +11,6 @@ docker run -v "$(pwd)/results:/app/results" baccus_model
 
 ```
 cd ~
-git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 git clone -b 3-reset_result_location https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
 python3 -m venv venv
