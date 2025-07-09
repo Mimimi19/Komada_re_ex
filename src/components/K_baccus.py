@@ -54,7 +54,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     I2_state[0] = keep_I2
 
     # 4状態の計算ループ
-    for i in tqdm.tqdm(range(1, time_steps), leave=False, desc=f'K_Model({label})'):
+    for i in tqdm.tqdm(range(1, time_steps), leave=False, desc=f'K_Model({label})', mininterval=1.0):
         # ルンゲ・クッタ法による次のタイムステップの状態変数の変化量を計算
         Runge1_R, Runge1_A, Runge1_I1, Runge1_I2 = dP(keep_R, keep_A, keep_I1, keep_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
         Runge2_R, Runge2_A, Runge2_I1, Runge2_I2 = dP(keep_R + Runge1_R / 2, keep_A + Runge1_A / 2, keep_I1 + Runge1_I1 / 2, keep_I2 + Runge1_I2 / 2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
