@@ -17,6 +17,8 @@ import components.K_baccus as K_LNK
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
 date_str = time.strftime("%Y%m%d_%H")
+local = 0 # ローカルでのテスト用
+# local = 1 # ワーキングステーション用
 
 # 提供データのインプット
 data_options =  "cb1"
@@ -24,13 +26,25 @@ data_options =  "cb1"
 if data_options == "cb1":
     print("cb1のデータを使用します")
     #cb1データ
-    Input = np.genfromtxt("/app/src/components/Provided_Data/cb1/wn_0.0002s.txt")
-    Output = np.genfromtxt("/app/src/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+    if local == 1:
+        # ローカルでのテスト用
+        Input = np.genfromtxt("app/components/Provided_Data/cb1/wn_0.0002s.txt")
+        Output = np.genfromtxt("app/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+    elif local == 0:
+        # ワーキングステーション用
+        Input = np.genfromtxt("./components/Provided_Data/cb1/wn_0.0002s.txt")
+        Output = np.genfromtxt("./components/Provided_Data/cb1/cb1_Fourier_Result.txt")
 elif data_options == "cb2":
     print("cb2のデータを使用します")
     #cb2データ
-    Input = np.genfromtxt("/app/src/components/Provided_Data/cb2/wn.txt")
-    Output = np.genfromtxt("/app/src/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
+    if local == 1:
+        # ローカルでのテスト用
+        Input = np.genfromtxt("app/components/Provided_Data/cb2/wn_0.0002s.txt")
+        Output = np.genfromtxt("app/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
+    elif local == 0:
+        # ワーキングステーション用
+        Input = np.genfromtxt("./components/Provided_Data/cb2/wn_0.0002s.txt")
+        Output = np.genfromtxt("./components/Provided_Data/cb2/cb2_Fourier_Result.txt")
 
 # 設定ファイルの読み込み
 def load_config(filepath):
@@ -40,7 +54,7 @@ def load_config(filepath):
 
 # 実験結果の保存
 def save_results(result, filepath):
-    print(f"結果を保存: {filepath}")
+    # print(f"結果を保存: {filepath}")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'a', encoding='utf-8') as file:
         file.write(str(result) + '\n')
@@ -52,7 +66,12 @@ def LNK_model(x):
     global data_options
     total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
     #ハイパーパラメータの設定
-    config_file_path = '/app/src/components/config/Baccus.yaml'
+    if local == 1:
+        # ローカルでのテスト用
+        config_file_path = '/app/src/components/config/Baccus.yaml'
+    elif local == 0:
+        # ワーキングステーション用
+        config_file_path = './components/config/Baccus.yaml'
     # 設定ファイルからパラメータを取得
     try:
         # 設定を読み込む
@@ -102,7 +121,7 @@ def LNK_model(x):
 
     #Linear Filterについて
     # F_LNX.mainの戻り値は、線形フィルターカーネル全体と時間軸
-    print("線形フィルターの計算を開始します...")
+    # print("線形フィルターの計算を開始します...")
     Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
 
     #畳み込みでチルダgの作成
@@ -140,15 +159,15 @@ def LNK_model(x):
     g = tild_g / scale_Linear
     
     #Nonlinearモデル
-    print("非線形モデルの計算を開始します...")
+    # print("非線形モデルの計算を開始します...")
     U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g)])
         
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
-    print("Kineticモデルの計算を開始します...")
+    # print("Kineticモデルの計算を開始します...")
     R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic)
     
-    print("スピアマンの相関係数を計算します...")
+    # print("スピアマンの相関係数を計算します...")
     #スピアマンによる評価
     correlation = 1000.0 # デフォルトで大きな値を設定
     if check == 1:
@@ -188,7 +207,7 @@ def LNK_model(x):
         save_results(correlation, os.path.join(param_results_dir, 'correlation.txt'))
         
         # 状態の保存
-        state_results_dir = os.path.join(results_base_dir, 'state', date_str) 
+        state_results_dir = os.path.join(results_base_dir, date_str, 'state') 
         os.makedirs(state_results_dir, exist_ok=True)
         save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
         save_results(A_state, os.path.join(state_results_dir, 'A_state.txt'))
@@ -202,7 +221,7 @@ def LNK_model(x):
         failed_lnk_model_runs += 1 # Kineticモデルが失敗した場合は失敗としてマーク
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
     # 結果の表示
-    print(f"相関係数: {correlation:.4f}")
+    # print(f"相関係数: {correlation:.4f}")
     if total_lnk_model_runs > 0:
         failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
         print(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
