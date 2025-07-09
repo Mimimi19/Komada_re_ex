@@ -16,7 +16,7 @@ git fetch upstream
 git checkout main
 cd src
 python3 -m venv venv
-pip install tqdm numpy scipy pyyaml matplotlib
 source venv/bin/activate
+pip install tqdm numpy scipy pyyaml matplotlib
 python3 /home/coder/Re_experiment/src/BaccusModel.py
 ```
