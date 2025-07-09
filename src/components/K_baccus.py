@@ -59,16 +59,10 @@ def _main_numba_core(time_steps, u_input, dt, R_start, A_start, I1_start, I2_sta
         keep_I1 = np.clip(keep_I1, 0.0, 1.0)
         keep_I2 = np.clip(keep_I2, 0.0, 1.0)
         
-        # 状態が0から1の範囲を逸脱していないかのチェック (境界値を含むように <= に修正)
-        # Numbaのnopythonモードではtqdm.write()は使えないため、ここではデバッグメッセージを省略
-        # もしデバッグメッセージが必要な場合は、このjit関数からチェック部分を分離するか、
-        # jitを使わないPythonコードでチェックを行う必要があります。
-        if not (0 <= keep_R <= 1 and 0 <= keep_A <= 1 and 0 <= keep_I1 <= 1 and 0 <= keep_I2 <= 1):
+        # 状態が0から1の範囲を逸脱していないかのチェック クリップしているため１に等しい時は逸脱した時と考えられる
+        if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
             check = 0 # 異常フラグを設定
             # 計算が中断されたことを示すため、既に計算された部分の配列をスライスして返す
-            # Numbaのnopythonモードでは、部分的な配列を返す際に型推論が難しくなる場合があるため、
-            # エラー発生時は全長の配列とcheckフラグを返すように変更します。
-            # 呼び出し元でcheckフラグを確認し、必要に応じてスライスしてください。
             return R_state, A_state, I1_state, I2_state, check
             
         # 状態の保存: 事前に確保した配列の現在のインデックスに直接書き込む
@@ -90,7 +84,6 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     # Numbaでコンパイルされたコア関数を呼び出す
     # tqdmは_main_numba_core内では使えないため、この関数でtqdmを適用する
     # ただし、LNK_model側で既にtqdmが適用されているため、ここではtqdmは使用しない。
-    # 純粋に_main_numba_coreを呼び出すだけにする。
     R_state, A_state, I1_state, I2_state, check = _main_numba_core(
         time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     )
