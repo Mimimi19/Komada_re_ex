@@ -14,9 +14,9 @@ git remote -v
 git remote add upstream https://github.com/Mimimi19/Komada_re_ex.git
 git fetch upstream
 git checkout main
-cd src
 python3 -m venv venv
 source venv/bin/activate
+cd src
 pip install tqdm numpy scipy pyyaml matplotlib
 python3 /home/coder/Re_experiment/src/BaccusModel.py
 ```
