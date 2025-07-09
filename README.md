@@ -13,5 +13,5 @@ python3 -m venv venv
 source venv/bin/activate
 pip install tqdm numpy scipy pyyaml matplotlib
 cd src
-python BaccusModel.py
+python3 BaccusModel.py
 ```
