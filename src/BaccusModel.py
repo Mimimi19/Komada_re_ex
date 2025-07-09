@@ -1,13 +1,13 @@
 # coding: utf-8
 from tqdm import tqdm
 import pprint
-import math
 import numpy as np
 from scipy.stats import spearmanr
 from scipy.optimize import differential_evolution
 import yaml
 import os
 import time
+import sys
 
 import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
@@ -149,8 +149,8 @@ def LNK_model(x, save_states=False):
     if Record2 == 0:
         print("Error: Record2 is zero, cannot calculate scale_Linear. Input might be all zeros.")
         raise
-    scale_Linear = math.sqrt(Record1 / Record2)
-    
+    scale_Linear = np.sqrt(Record1 / Record2)
+
     #スケーリング
     g = tild_g / scale_Linear
     
