@@ -11,7 +11,7 @@ def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
 
     return [dR_dt, dA_dt, dI1_dt, dI2_dt]
 
-def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr):
+def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr, label):
     """
     Baccusモデルの状態微分方程式を定義します。
     R: 休息状態の占有率
@@ -25,6 +25,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     kfr: 高速回復速度
     ksi: 低速活性化速度
     ksr: 超回復速度
+    label: tqdmのdescに表示する追加ラベル
     """
     check = 1
     #Kineticモデル
@@ -40,7 +41,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     I2_state = np.array([keep_I2])
 
     #4状態の計算
-    for i in tqdm.tqdm(range(1, time_steps)):
+    for i in tqdm.tqdm(range(1, time_steps), leave=False, desc=f'K_Model({label})'):
         # ルンゲ・クッタ法
         # 1段階目
         Runge1_R, Runge1_A, Runge1_I1, Runge1_I2 = dP(keep_R, keep_A, keep_I1, keep_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
