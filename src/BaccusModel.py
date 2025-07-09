@@ -16,12 +16,17 @@ import components.K_baccus as K_LNK
 # グローバルカウンタ
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
-failed_lnk_model_runs = 0 
-total_lnk_model_runs = 0 
-failure_rate = 0.0
 date_str = time.strftime("%Y%m%d_%H")
-local = 1 # ローカルでのテスト用
-# local = 0 # ワーキングステーション用
+
+# Docker環境では /app/src となる
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# プロジェクトのルートディレクトリを取得 (Docker環境では /app となる)
+project_root_dir = os.path.dirname(script_dir)
+
+# エポックごとの保存のためのグローバル変数
+# current_epoch_best_fun_value は LNK_model が計算した最新の目的関数値を保持
+current_epoch_best_fun_value = 1000.0 # 最小化問題なので初期値は大きな値
+epoch_counter = 0 # エポックカウンター
 
 # 提供データのインプット
 data_options =  "cb1"
@@ -29,55 +34,41 @@ data_options =  "cb1"
 if data_options == "cb1":
     print("cb1のデータを使用します")
     #cb1データ
-    if local == 1:
-        # ローカルでのテスト用
-        Input = np.genfromtxt("src/components/Provided_Data/cb1/wn_0.0002s.txt")
-        Output = np.genfromtxt("src/components/Provided_Data/cb1/cb1_Fourier_Result.txt")
-    elif local == 0:
-        # ワーキングステーション用
-        Input = np.genfromtxt("./components/Provided_Data/cb1/wn_0.0002s.txt")
-        Output = np.genfromtxt("./components/Provided_Data/cb1/cb1_Fourier_Result.txt")
+    Input = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "wn_0.0002s.txt"))
+    Output = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "cb1_Fourier_Result.txt"))
 elif data_options == "cb2":
     print("cb2のデータを使用します")
     #cb2データ
-    if local == 1:
-        # ローカルでのテスト用
-        Input = np.genfromtxt("src/components/Provided_Data/cb2/wn_0.0002s.txt")
-        Output = np.genfromtxt("src/components/Provided_Data/cb2/cb2_Fourier_Result.txt")
-    elif local == 0:
-        # ワーキングステーション用
-        Input = np.genfromtxt("./components/Provided_Data/cb2/wn_0.0002s.txt")
-        Output = np.genfromtxt("./components/Provided_Data/cb2/cb2_Fourier_Result.txt")
 
+    Input = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "wn.txt")) # wn.txtが正しいか確認
+    Output = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "cb2_Fourier_Result.txt"))
 # 設定ファイルの読み込み
 def load_config(filepath):
     with open(filepath, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
     return config
 
-# 実験結果の保存
-def save_results(result, filepath):
-    # print(f"結果を保存: {filepath}")
+# 実験結果の保存 (NumPy配列の保存に対応するため修正)
+def save_results(data, filepath):
+    # print(f"結果を保存: {filepath}") 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, 'a', encoding='utf-8') as file:
-        file.write(str(result) + '\n')
+    if isinstance(data, np.ndarray):
+        # NumPy配列はnp.savetxtで保存
+        np.savetxt(filepath, data, fmt='%.6f')
+    else:
+        # その他のデータは通常のファイル書き込み
+        with open(filepath, 'w', encoding='utf-8') as file:
+            file.write(str(data) + '\n')
 # 目的関数定義
-def LNK_model(x):
+# save_states引数を追加
+def LNK_model(x, save_states=False):
     global total_lnk_model_runs
     global failed_lnk_model_runs
-    global total_lnk_model_runs
-    global failure_rate
-    global date_str
-    global data_options
+    global current_epoch_best_fun_value # グローバル変数を参照
 
     total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
     #ハイパーパラメータの設定
-    if local == 1:
-        # ローカルでのテスト用
-        config_file_path = 'src/components/config/Baccus.yaml'
-    elif local == 0:
-        # ワーキングステーション用
-        config_file_path = './components/config/Baccus.yaml'
+    config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
     # 設定ファイルからパラメータを取得
     try:
         # 設定を読み込む
@@ -127,7 +118,7 @@ def LNK_model(x):
 
     #Linear Filterについて
     # F_LNX.mainの戻り値は、線形フィルターカーネル全体と時間軸
-    # print("線形フィルターの計算を開始します...")
+    # print("線形フィルターの計算を開始します...") # 最適化中は頻繁な出力は抑制
     Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
 
     #畳み込みでチルダgの作成
@@ -149,7 +140,6 @@ def LNK_model(x):
     if len(tild_g) != len(Input):
         print(f"Error: Length of tild_g ({len(tild_g)}) does not match length of Input ({len(Input)}) for scaling.")
         raise
-
     # 入力刺激とチルダgの分散を求める
     # dtは合計の計算で考慮される
     Record1 = np.sum(tild_g * tild_g) * dt
@@ -171,7 +161,11 @@ def LNK_model(x):
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     # print("Kineticモデルの計算を開始します...")
-    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start, ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, label = f"失敗/実行回数(失敗率):{failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
+    R_state, A_state, I1_state, I2_state ,check= K_LNK.main(
+        len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start,
+        ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
+        label=f"LNK_run {total_lnk_model_runs}" # K_baccusのtqdmのdescに表示されるラベル
+    )
 
     # print("スピアマンの相関係数を計算します...")
     #スピアマンによる評価
@@ -192,33 +186,7 @@ def LNK_model(x):
         else:
             correlation, pvalue = spearmanr(Output, keep_Post)
         
-        # パラメータの保存
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root_dir = os.path.dirname(script_dir) 
-        results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus'+ data_options)
 
-        # パラメータ用のディレクトリ
-        param_results_dir = os.path.join(results_base_dir, date_str)
-        os.makedirs(param_results_dir, exist_ok=True)
-        
-        for i in range(J):#線形フィルタのパラメータを保存
-            save_results(x[i], os.path.join(param_results_dir, f'L{i+1}.txt'))
-        save_results(x[J], os.path.join(param_results_dir, 'delta.txt'))
-        save_results(x[J+1], os.path.join(param_results_dir, 'a.txt'))
-        save_results(x[J+2], os.path.join(param_results_dir, 'b1.txt'))
-        save_results(x[J+3], os.path.join(param_results_dir, 'b2.txt'))
-        save_results(x[J+4], os.path.join(param_results_dir, 'ka.txt'))
-        save_results(x[J+5], os.path.join(param_results_dir, 'kfi.txt'))
-        save_results(x[J+6], os.path.join(param_results_dir, 'kfr.txt'))
-        save_results(correlation, os.path.join(param_results_dir, 'correlation.txt'))
-        
-        # 状態の保存
-        state_results_dir = os.path.join(results_base_dir, date_str, 'state') 
-        os.makedirs(state_results_dir, exist_ok=True)
-        save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
-        save_results(A_state, os.path.join(state_results_dir, 'A_state.txt'))
-        save_results(I1_state, os.path.join(state_results_dir, 'I1_state.txt'))
-        save_results(I2_state, os.path.join(state_results_dir, 'I2_state.txt'))
 
         # 最小化問題のため相関の負の値を返す
         correlation = (-1) * correlation 
@@ -228,12 +196,85 @@ def LNK_model(x):
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
     # 結果の表示
     # print(f"相関係数: {correlation:.4f}")
-    if total_lnk_model_runs > 0:
-        failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
-        # print(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({failure_rate:.2f}%)")
+    # LNK_modelの進捗表示 (total_lnk_model_runs が 100 の倍数または初回のみ)
+    if total_lnk_model_runs % 100 == 0 or total_lnk_model_runs == 1:
+        if total_lnk_model_runs > 0:
+            current_failure_rate = (failed_lnk_model_runs / total_lnk_model_runs) * 100
+            tqdm.write(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({current_failure_rate:.2f}%)")
+        else:
+            tqdm.write("実行記録がありません。")
+            
+    # コールバック関数で参照できるように、現在の目的関数値をグローバル変数に格納
+    global current_epoch_best_fun_value
+    current_epoch_best_fun_value = correlation
+
+    # save_statesがTrueの場合のみ、相関係数と状態を返す
+    if save_states:
+        return correlation, R_state, A_state, I1_state, I2_state
     else:
-        print("実行記録がありません。")
-    return correlation
+        return correlation
+
+# 最適化結果を保存する関数 (最終結果用)
+def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, J):
+    """
+    最適化されたパラメータと対応する状態をファイルに保存します。
+    この関数は最適化完了後に一度だけ呼び出されます。
+    """
+    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options)
+
+    # パラメータ用のディレクトリ (日付と時刻でユニークに)
+    param_results_dir = os.path.join(results_base_dir, date_str)
+    os.makedirs(param_results_dir, exist_ok=True)
+
+    print(f"\n最適化結果を {param_results_dir} に保存中...")
+
+    for i in range(J): # 線形フィルタのパラメータを保存
+        save_results(optimal_params[i], os.path.join(param_results_dir, f'L{i+1}.txt'))
+    save_results(optimal_params[J], os.path.join(param_results_dir, 'delta.txt'))
+    save_results(optimal_params[J+1], os.path.join(param_results_dir, 'a.txt'))
+    save_results(optimal_params[J+2], os.path.join(param_results_dir, 'b1.txt'))
+    save_results(optimal_params[J+3], os.path.join(param_results_dir, 'b2.txt'))
+    save_results(optimal_params[J+4], os.path.join(param_results_dir, 'ka.txt'))
+    save_results(optimal_params[J+5], os.path.join(param_results_dir, 'kfi.txt'))
+    save_results(optimal_params[J+6], os.path.join(param_results_dir, 'kfr.txt'))
+    save_results(optimal_correlation, os.path.join(param_results_dir, 'correlation.txt'))
+
+    # 状態の保存 (最終結果としてのみ)
+    state_results_dir = os.path.join(param_results_dir, 'state') # パラメータディレクトリの下にstateディレクトリを作成
+    os.makedirs(state_results_dir, exist_ok=True)
+    print(f"状態を {state_results_dir} に保存中...")
+    save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
+    save_results(A_state, os.path.join(state_results_dir, 'A_state.txt'))
+    save_results(I1_state, os.path.join(state_results_dir, 'I1_state.txt'))
+    save_results(I2_state, os.path.join(state_results_dir, 'I2_state.txt'))
+    print("保存が完了しました。")
+
+# エポックごとに結果を保存するコールバック関数
+def save_intermediate_results(xk, convergence):
+    """
+    differential_evolutionの各イテレーション（エポック）の終わりに呼び出され、
+    現在の最良パラメータと相関係数を保存します。
+    状態データは保存しません。
+    """
+    global epoch_counter
+    global current_epoch_best_fun_value # LNK_modelで更新された最新の目的関数値
+
+    epoch_counter += 1
+    
+    # 中間結果を保存するディレクトリ
+    intermediate_results_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options, date_str, 'epochs')
+    os.makedirs(intermediate_results_dir, exist_ok=True)
+
+    # 現在の最良パラメータを保存
+    params_filepath = os.path.join(intermediate_results_dir, f'epoch_{epoch_counter:03d}_params.txt')
+    save_results(xk, params_filepath)
+
+    # 現在の最良相関係数を保存 (LNK_modelで更新されたグローバル変数を使用)
+    correlation_filepath = os.path.join(intermediate_results_dir, f'epoch_{epoch_counter:03d}_correlation.txt')
+    save_results(-current_epoch_best_fun_value, correlation_filepath) # 負の値を正に戻して保存
+
+    tqdm.write(f"--- Epoch {epoch_counter:03d} Results Saved (Correlation: {-current_epoch_best_fun_value:.4f}) ---")
+
 
 def main(Try_bounds):
     #差分進化法
@@ -244,19 +285,41 @@ def main(Try_bounds):
     # strategy='rand1bin' で戦略を設定
     # workers=-1 で全てのCPUコアを使用
     # 差分進化アルゴリズムの目的関数呼び出し: 約 20,000 回 (maxiter * popsize)
-    result = differential_evolution(LNK_model, Try_bounds, disp=True, updating = 'deferred', maxiter = 100, popsize = 200, strategy = 'rand1bin', workers=-1)
+    # callback引数に中間結果保存関数を指定
+    print("差分進化法による最適化を開始します...")
+    result = differential_evolution(LNK_model, Try_bounds, disp=True, updating = 'deferred', maxiter = 100, popsize = 200, strategy = 'rand1bin', workers=-1, callback=save_intermediate_results)
 
     #表示
+    print("\n最適化が完了しました。")
     pprint.pprint(result)
-    # パラメータの保存
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root_dir = os.path.dirname(script_dir) 
-    results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options)
 
-    # パラメータ用のディレクトリ
-    param_results_dir = os.path.join(results_base_dir, date_str)
-    os.makedirs(param_results_dir, exist_ok=True)
-    save_results(result.x, os.path.join(param_results_dir, 'result.txt'))
+    # 最適なパラメータを取得
+    optimal_params = result.x
+    optimal_correlation_value = -result.fun # 最小化された負の相関係数を正に戻す
+
+    # 最適なパラメータでLNK_modelを再度実行し、状態を取得
+    print("\n最終的な状態を取得するため、最適なパラメータでモデルを再実行します...")
+    # LNK_modelの戻り値がタプルであることを考慮してアンパック
+    final_correlation_check, R_state_final, A_state_final, I1_state_final, I2_state_final = LNK_model(optimal_params, save_states=True)
+
+    # Jの値は設定ファイルから取得する必要がある
+    config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
+    try:
+        config = load_config(config_file_path)
+        J = config['J']
+    except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
+        print(f"設定ファイルの読み込みまたはキーの取得エラー: {e}")
+        print("Jの値が取得できないため、最終結果の保存をスキップします。")
+        return
+
+    # 状態が正常に取得できた場合のみ保存
+    if A_state_final is not None:
+        save_optimal_results(optimal_params, optimal_correlation_value,
+                             R_state_final, A_state_final, I1_state_final, I2_state_final, J)
+    else:
+        print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
+        print(f"最終的な相関係数: {optimal_correlation_value:.4f}")
+
 
 if __name__ == "__main__":
     #探索するパラメータの範囲
