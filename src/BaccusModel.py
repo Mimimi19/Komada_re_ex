@@ -302,20 +302,11 @@ def main(Try_bounds):
     # LNK_modelの戻り値がタプルであることを考慮してアンパック
     final_correlation_check, R_state_final, A_state_final, I1_state_final, I2_state_final = LNK_model(optimal_params, save_states=True)
 
-    # Jの値は設定ファイルから取得する必要がある
-    config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
-    try:
-        config = load_config(config_file_path)
-        J = config['J']
-    except (FileNotFoundError, yaml.YAMLError, KeyError) as e:
-        print(f"設定ファイルの読み込みまたはキーの取得エラー: {e}")
-        print("Jの値が取得できないため、最終結果の保存をスキップします。")
-        return
 
     # 状態が正常に取得できた場合のみ保存
     if A_state_final is not None:
         save_optimal_results(optimal_params, optimal_correlation_value,
-                             R_state_final, A_state_final, I1_state_final, I2_state_final, J)
+                             R_state_final, A_state_final, I1_state_final, I2_state_final)
     else:
         print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
         print(f"最終的な相関係数: {optimal_correlation_value:.4f}")
