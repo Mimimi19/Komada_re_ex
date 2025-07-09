@@ -156,8 +156,7 @@ def LNK_model(x, save_states=False):
     
     #Nonlinearモデル
     # print("非線形モデルの計算を開始します...")
-    U_Nonlinear = np.array([N_LNK.main(val, a_nonlinear, b1_nonlinear, b2_nonlinear) for val in tqdm(g, leave=False, desc="N_Model")])
-        
+    U_Nonlinear = N_LNK.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     # print("Kineticモデルの計算を開始します...")
