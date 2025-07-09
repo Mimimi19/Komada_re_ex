@@ -54,10 +54,12 @@ def _main_numba_core(time_steps, u_input, dt, R_start, A_start, I1_start, I2_sta
         keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
         
         # 状態のクリッピング: 状態変数を0から1の範囲に制限する
-        keep_R = np.clip(keep_R, 0.0, 1.0)
-        keep_A = np.clip(keep_A, 0.0, 1.0)
-        keep_I1 = np.clip(keep_I1, 0.0, 1.0)
-        keep_I2 = np.clip(keep_I2, 0.0, 1.0)
+        # np.clip() は配列に対して使うのがNumbaのnopythonモードで推奨される
+        # スカラー値のクリッピングには np.maximum と np.minimum を組み合わせる
+        keep_R = np.maximum(0.0, np.minimum(keep_R, 1.0))
+        keep_A = np.maximum(0.0, np.minimum(keep_A, 1.0))
+        keep_I1 = np.maximum(0.0, np.minimum(keep_I1, 1.0))
+        keep_I2 = np.maximum(0.0, np.minimum(keep_I2, 1.0))
         
         # 状態が0から1の範囲を逸脱していないかのチェック クリップしているため１に等しい時は逸脱した時と考えられる
         if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
