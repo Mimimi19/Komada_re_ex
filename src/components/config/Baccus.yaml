@@ -1,3 +1,7 @@
+
+# 提供データのインプット
+data_options: "cb2" # cb1, cb2
+
 # ハイパーパラメータの設定
 
 # 刻み幅
@@ -14,3 +18,10 @@ b2: 1.0
 R_start: 0.842
 A_start: 0.157
 I_start: 0.001
+
+# 最適化の設定
+#  trueに設定すると、最適化が早期終了した場合の処理を行うが、局所解に陥る可能性がる。
+# Early termination flag (早期終了フラグ)
+Et: true
+# 収束判定のための許容誤差
+CONVERGENCE_TOLERANCE: 1e-6
