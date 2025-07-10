@@ -13,24 +13,54 @@ import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
-# グローバルカウンタ
-total_lnk_model_runs = 0
-failed_lnk_model_runs = 0
-date_str = time.strftime("%Y%m%d_%H")
+# 設定ファイルの読み込み関数をファイルの先頭に移動
+def load_config(filepath):
+    """
+    指定されたYAMLファイルから設定を読み込みます。
+    """
+    with open(filepath, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
+    return config
 
 # Docker環境では /app/src となる
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # プロジェクトのルートディレクトリを取得 (Docker環境では /app となる)
 project_root_dir = os.path.dirname(script_dir)
 
+# スクリプトのディレクトリを取得 (config_file_pathの構築に必要)
+config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
+
+# 設定ファイルの読み込み (グローバルスコープで一度だけ読み込む)
+try:
+    # 設定を読み込む
+    config = load_config(config_file_path)
+except FileNotFoundError:
+    print(f"エラー: '{config_file_path}' が見つかりません。") # printに変更
+    raise 
+except yaml.YAMLError as exc:
+    print(f"YAMLファイルのパースエラー: {exc}") # printに変更
+    raise 
+except KeyError as e:
+    print(f"設定ファイルに予期せぬキーがありません: {e}") # printに変更
+    raise 
+
+# グローバルカウンタ
+total_lnk_model_runs = 0
+failed_lnk_model_runs = 0
+date_str = time.strftime("%Y%m%d_%H")
+
 # エポックごとの保存のためのグローバル変数
 # current_epoch_best_fun_value は LNK_model が計算した最新の目的関数値を保持
 current_epoch_best_fun_value = 1000.0 # 最小化問題なので初期値は大きな値
 epoch_counter = 0 # エポックカウンター
+previous_epoch_best_fun_value = 1000.0 # 前回の最良目的関数値を保持 (初期値は大きな値)
+# 浮動小数点数の比較のための許容誤差
+CONVERGENCE_TOLERANCE = config['CONVERGENCE_TOLERANCE'] # 目標関数値がこの差以下であれば等しいと見なす
+#  trueに設定すると、最適化が早期終了した場合の処理を行うが、局所解に陥る可能性がる。
+Et = config['Et'] # Early termination flag (早期終了フラグ)
 
 # 提供データのインプット
-data_options =  "cb1"
-# data_options =  "cb2"
+data_options = config['data_options']
 if data_options == "cb1":
     print("cb1のデータを使用します")
     #cb1データ
@@ -42,11 +72,6 @@ elif data_options == "cb2":
 
     Input = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "wn.txt")) # wn.txtが正しいか確認
     Output = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "cb2_Fourier_Result.txt"))
-# 設定ファイルの読み込み
-def load_config(filepath):
-    with open(filepath, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
-    return config
 
 # 実験結果の保存 (NumPy配列の保存に対応するため修正)
 def save_results(data, filepath):
@@ -67,36 +92,21 @@ def LNK_model(x, save_states=False):
     global current_epoch_best_fun_value # グローバル変数を参照
 
     total_lnk_model_runs += 1 # 関数の開始時に合計実行回数をインクリメント
-    #ハイパーパラメータの設定
-    config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
-    # 設定ファイルからパラメータを取得
+    #ハイパーパラメータの設定 (configはグローバルで読み込まれているため、再読み込みは不要)
     try:
-        # 設定を読み込む
-        config = load_config(config_file_path)
-        # 設定ファイルからパラメータを取得
-        try:
-            dt = config['dt'] #刻み幅
-            #初期値設定のための初期値
-            R_start = config['R_start']
-            A_start = config['A_start']
-            I1_start = config['I_start'] # Assuming I_start corresponds to I1_start
-            I2_start = 0.0 # Assuming I2_start is 0.0 as it's not in config
-            
-            tau = config['tau']
-            #基底関数の数
-            J = config['J'] # 基底関数の数 (J)
-        except KeyError as e:
-            print(f"設定ファイルに必要なキーがありません: {e}")
-            raise
-    except FileNotFoundError:
-        print(f"エラー: '{config_file_path}' が見つかりません。")
-        raise
-    except yaml.YAMLError as exc:
-        print(f"YAMLファイルのパースエラー: {exc}")
-        raise
+        dt = config['dt'] #刻み幅
+        #初期値設定のための初期値
+        R_start = config['R_start']
+        A_start = config['A_start']
+        I1_start = config['I_start'] # Assuming I_start corresponds to I1_start
+        I2_start = 0.0 # Assuming I2_start is 0.0 as it's not in config
+        
+        tau = config['tau']
+        #基底関数の数
+        J = config['J'] # 基底関数の数 (J)
     except KeyError as e:
-        print(f"設定ファイルに予期せぬキーがありません: {e}")
-        raise
+        tqdm.write(f"設定ファイルに必要なキーがありません: {e}") 
+        raise 
    
     # 線形フィルタパラメータ (x[0]からx[J-1])
     # x[J] は delta
@@ -138,8 +148,9 @@ def LNK_model(x, save_states=False):
     #チルダgの計算（スケーリング前）
     # Inputとtild_gは同じ長さである必要がある
     if len(tild_g) != len(Input):
-        print(f"Error: Length of tild_g ({len(tild_g)}) does not match length of Input ({len(Input)}) for scaling.")
-        raise
+        tqdm.write(f"Error: Length of tild_g ({len(tild_g)}) does not match length of Input ({len(Input)}) for scaling.") # tqdm.writeで出力
+        failed_lnk_model_runs += 1
+        return 10000.0, None, None, None, None
     # 入力刺激とチルダgの分散を求める
     # dtは合計の計算で考慮される
     Record1 = np.sum(tild_g * tild_g) * dt
@@ -147,9 +158,10 @@ def LNK_model(x, save_states=False):
     
     #スケーリング係数を求める
     if Record2 == 0:
-        print("Error: Record2 is zero, cannot calculate scale_Linear. Input might be all zeros.")
-        raise
-    scale_Linear = np.sqrt(Record1 / Record2)
+        tqdm.write("Error: Record2 is zero, cannot calculate scale_Linear. Input might be all zeros.") # tqdm.writeで出力
+        failed_lnk_model_runs += 1
+        return 10000.0, None, None, None, None
+    scale_Linear = np.sqrt(Record1 / Record2) # math.sqrt から np.sqrt に変更
 
     #スケーリング
     g = tild_g / scale_Linear
@@ -157,6 +169,7 @@ def LNK_model(x, save_states=False):
     #Nonlinearモデル
     # print("非線形モデルの計算を開始します...")
     U_Nonlinear = N_LNK.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
+        
     #Kineticモデル
     # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     # print("Kineticモデルの計算を開始します...")
@@ -176,7 +189,7 @@ def LNK_model(x, save_states=False):
         
         # Outputとkeep_Postの長さを確認
         if len(Output) != len(keep_Post):
-            print(f"Warning: Length of Output ({len(Output)}) and calculated Post-synaptic potential ({len(keep_Post)}) do not match.")
+            tqdm.write(f"Warning: Length of Output ({len(Output)}) and calculated Post-synaptic potential ({len(keep_Post)}) do not match.")
             # For correlation calculation, trim to the shorter length
             min_len = min(len(Output), len(keep_Post))
             Output_trimmed = Output[:min_len]
@@ -185,16 +198,19 @@ def LNK_model(x, save_states=False):
         else:
             correlation, pvalue = spearmanr(Output, keep_Post)
         
-
-
         # 最小化問題のため相関の負の値を返す
         correlation = (-1) * correlation 
     else:
-        # print("Kinetic model が失敗しました.")
-        failed_lnk_model_runs += 1 # Kineticモデルが失敗した場合は失敗としてマーク
+        # Kinetic model が失敗した場合、LNK_model側でメッセージを出力
+        failed_lnk_model_runs += 1
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
-    # 結果の表示
-    # print(f"相関係数: {correlation:.4f}")
+        # K_LNK.mainからの戻り値がPartial R state length: ... の形式なので、それを利用する
+        # if R_state is not None: # R_stateがNoneでないことを確認
+        #      tqdm.write(f"Kinetic model が失敗しました (LNK_run {total_lnk_model_runs}). Partial R state length: {len(R_state)}")
+        # else:
+        #      tqdm.write(f"Kinetic model が失敗しました (LNK_run {total_lnk_model_runs}). 状態データは利用できません。")
+
+
     # LNK_modelの進捗表示 (total_lnk_model_runs が 100 の倍数または初回のみ)
     if total_lnk_model_runs % 100 == 0 or total_lnk_model_runs == 1:
         if total_lnk_model_runs > 0:
@@ -214,18 +230,24 @@ def LNK_model(x, save_states=False):
         return correlation
 
 # 最適化結果を保存する関数 (最終結果用)
-def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, J):
+def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, is_early_termination=False):
     """
     最適化されたパラメータと対応する状態をファイルに保存します。
     この関数は最適化完了後に一度だけ呼び出されます。
+    is_early_termination: 早期終了による呼び出しの場合True
     """
     results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options)
 
     # パラメータ用のディレクトリ (日付と時刻でユニークに)
-    param_results_dir = os.path.join(results_base_dir, date_str)
+    # 早期終了の場合は、ディレクトリ名に 'early_termination' を追加すると分かりやすい
+    if is_early_termination:
+        param_results_dir = os.path.join(results_base_dir, date_str + "_early_termination")
+    else:
+        param_results_dir = os.path.join(results_base_dir, date_str)
+    
     os.makedirs(param_results_dir, exist_ok=True)
 
-    print(f"\n最適化結果を {param_results_dir} に保存中...")
+    tqdm.write(f"\n最適化結果を {param_results_dir} に保存中...")
 
     for i in range(J): # 線形フィルタのパラメータを保存
         save_results(optimal_params[i], os.path.join(param_results_dir, f'L{i+1}.txt'))
@@ -241,12 +263,12 @@ def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, 
     # 状態の保存 (最終結果としてのみ)
     state_results_dir = os.path.join(param_results_dir, 'state') # パラメータディレクトリの下にstateディレクトリを作成
     os.makedirs(state_results_dir, exist_ok=True)
-    print(f"状態を {state_results_dir} に保存中...")
+    tqdm.write(f"状態を {state_results_dir} に保存中...")
     save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
     save_results(A_state, os.path.join(state_results_dir, 'A_state.txt'))
     save_results(I1_state, os.path.join(state_results_dir, 'I1_state.txt'))
     save_results(I2_state, os.path.join(state_results_dir, 'I2_state.txt'))
-    print("保存が完了しました。")
+    tqdm.write("保存が完了しました。")
 
 # エポックごとに結果を保存するコールバック関数
 def save_intermediate_results(xk, convergence):
@@ -257,8 +279,9 @@ def save_intermediate_results(xk, convergence):
     """
     global epoch_counter
     global current_epoch_best_fun_value # LNK_modelで更新された最新の目的関数値
-    global total_lnk_model_runs
-
+    global previous_epoch_best_fun_value # 前回の最良目的関数値
+    global total_lnk_model_runs # Jの値を取得するために必要 (実際にはJは設定ファイルから取得)
+    global Et # 早期終了フラグ  
     epoch_counter += 1
     
     # 中間結果を保存するディレクトリ
@@ -275,6 +298,31 @@ def save_intermediate_results(xk, convergence):
 
     tqdm.write(f"--- Epoch {epoch_counter:03d} Results Saved (Correlation: {-current_epoch_best_fun_value:.4f}) at Total Runs: {total_lnk_model_runs} ---")
 
+    # 目標関数値の収束チェック
+    # 浮動小数点数の比較は許容誤差を設ける
+    if Et and epoch_counter > 1 and abs(current_epoch_best_fun_value - previous_epoch_best_fun_value) < CONVERGENCE_TOLERANCE:
+        tqdm.write(f"\n!!! 目標関数値が収束しました (差: {abs(current_epoch_best_fun_value - previous_epoch_best_fun_value):.6e} < {CONVERGENCE_TOLERANCE:.1e}) !!!")
+        tqdm.write("最適化を早期終了します。")
+        
+        # 早期終了時の最終保存処理
+        # 最適なパラメータでLNK_modelを再度実行し、状態を取得
+        # この時点でのxkがそのエポックの最良パラメータ
+        final_correlation_check, R_state_final, A_state_final, I1_state_final, I2_state_final = LNK_model(xk, save_states=True)
+        
+        if A_state_final is not None:
+            save_optimal_results(xk, -current_epoch_best_fun_value, # xkはコールバックの引数、目的関数値はグローバル変数
+                                 R_state_final, A_state_final, I1_state_final, I2_state_final,
+                                 is_early_termination=Et)
+        else:
+            tqdm.write("早期終了時のKineticモデル再実行が失敗したため、状態は保存されません。")
+        
+        return True # Trueを返すとdifferential_evolutionが停止します
+    
+    # 次のエポックのために現在の値を保存
+    previous_epoch_best_fun_value = current_epoch_best_fun_value
+    
+    return False # Falseを返すと最適化が続行されます
+
 
 def main(Try_bounds):
     #差分進化法
@@ -289,27 +337,33 @@ def main(Try_bounds):
     print("差分進化法による最適化を開始します...")
     result = differential_evolution(LNK_model, Try_bounds, disp=True, updating = 'deferred', maxiter = 100, popsize = 200, strategy = 'rand1bin', workers=-1, callback=save_intermediate_results)
 
-    #表示
-    print("\n最適化が完了しました。")
-    pprint.pprint(result)
+    # 最適化が早期終了した場合、result.message は 'callback function returned True' になる
+    # 自然終了した場合のみ、ここで最終保存を行う
+    if result.message != 'callback function returned True':
+        #表示
+        print("\n最適化が完了しました。")
+        pprint.pprint(result)
 
-    # 最適なパラメータを取得
-    optimal_params = result.x
-    optimal_correlation_value = -result.fun # 最小化された負の相関係数を正に戻す
+        # 最適なパラメータを取得
+        optimal_params = result.x
+        optimal_correlation_value = -result.fun # 最小化された負の相関係数を正に戻す
 
-    # 最適なパラメータでLNK_modelを再度実行し、状態を取得
-    print("\n最終的な状態を取得するため、最適なパラメータでモデルを再実行します...")
-    # LNK_modelの戻り値がタプルであることを考慮してアンパック
-    final_correlation_check, R_state_final, A_state_final, I1_state_final, I2_state_final = LNK_model(optimal_params, save_states=True)
+        # 最適なパラメータでLNK_modelを再度実行し、状態を取得
+        print("\n最終的な状態を取得するため、最適なパラメータでモデルを再実行します...")
+        final_correlation_check, R_state_final, A_state_final, I1_state_final, I2_state_final = LNK_model(optimal_params, save_states=True)
 
 
-    # 状態が正常に取得できた場合のみ保存
-    if A_state_final is not None:
-        save_optimal_results(optimal_params, optimal_correlation_value,
-                             R_state_final, A_state_final, I1_state_final, I2_state_final)
+        # 状態が正常に取得できた場合のみ保存
+        if A_state_final is not None:
+            save_optimal_results(optimal_params, optimal_correlation_value,
+                                 R_state_final, A_state_final, I1_state_final, I2_state_final)
+        else:
+            print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
+            print(f"最終的な相関係数: {optimal_correlation_value:.4f}")
     else:
-        print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
-        print(f"最終的な相関係数: {optimal_correlation_value:.4f}")
+        print("\n早期終了しました。")
+        # 早期終了時の保存はコールバック関数内で既に処理済み
+        pprint.pprint(result)
 
 
 if __name__ == "__main__":
