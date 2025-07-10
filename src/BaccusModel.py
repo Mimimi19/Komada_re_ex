@@ -257,6 +257,7 @@ def save_intermediate_results(xk, convergence):
     """
     global epoch_counter
     global current_epoch_best_fun_value # LNK_modelで更新された最新の目的関数値
+    global total_lnk_model_runs
 
     epoch_counter += 1
     
@@ -272,7 +273,7 @@ def save_intermediate_results(xk, convergence):
     correlation_filepath = os.path.join(intermediate_results_dir, f'epoch_{epoch_counter:03d}_correlation.txt')
     save_results(-current_epoch_best_fun_value, correlation_filepath) # 負の値を正に戻して保存
 
-    tqdm.write(f"--- Epoch {epoch_counter:03d} Results Saved (Correlation: {-current_epoch_best_fun_value:.4f}) ---")
+    tqdm.write(f"--- Epoch {epoch_counter:03d} Results Saved (Correlation: {-current_epoch_best_fun_value:.4f}) at Total Runs: {total_lnk_model_runs} ---")
 
 
 def main(Try_bounds):
