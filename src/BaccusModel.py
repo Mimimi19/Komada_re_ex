@@ -13,10 +13,10 @@ import components.F_LNX as F_LNX
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
-# 設定ファイルの読み込み関数をファイルの先頭に移動
+
 def load_config(filepath):
     """
-    指定されたYAMLファイルから設定を読み込みます。
+    ハイパーパラメータ設定ファイルを読み込みます。
     """
     with open(filepath, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
@@ -56,23 +56,22 @@ epoch_counter = 0 # エポックカウンター
 previous_epoch_best_fun_value = 1000.0 # 前回の最良目的関数値を保持 (初期値は大きな値)
 # 浮動小数点数の比較のための許容誤差
 CONVERGENCE_TOLERANCE = config['CONVERGENCE_TOLERANCE'] # 目標関数値がこの差以下であれば等しいと見なす
-#  trueに設定すると、最適化が早期終了した場合の処理を行うが、局所解に陥る可能性がる。
 Et = config['Et'] # Early termination flag (早期終了フラグ)
 
 # 提供データのインプット
 data_options = config['data_options']
 if data_options == "cb1":
-    print("cb1のデータを使用します")
     #cb1データ
     Input = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "wn_0.0002s.txt"))
     Output = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "cb1_Fourier_Result.txt"))
 elif data_options == "cb2":
-    print("cb2のデータを使用します")
     #cb2データ
-
     Input = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "wn.txt")) # wn.txtが正しいか確認
     Output = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "cb2_Fourier_Result.txt"))
-
+if Et:
+    print(f"{config['data_options']}のデータを使用します,早期終了フラグ: {Et}, 許容誤差: {CONVERGENCE_TOLERANCE:.1e}")
+else:
+    print(f"{config['data_options']}のデータを使用します,早期終了フラグ: {Et}")
 # 実験結果の保存 (NumPy配列の保存に対応するため修正)
 def save_results(data, filepath):
     # print(f"結果を保存: {filepath}") 
@@ -98,8 +97,8 @@ def LNK_model(x, save_states=False):
         #初期値設定のための初期値
         R_start = config['R_start']
         A_start = config['A_start']
-        I1_start = config['I_start'] # Assuming I_start corresponds to I1_start
-        I2_start = 0.0 # Assuming I2_start is 0.0 as it's not in config
+        I1_start = config['I_start']
+        I2_start = 0.0 # 今回は無視する
         
         tau = config['tau']
         #基底関数の数
@@ -128,7 +127,7 @@ def LNK_model(x, save_states=False):
 
     #Linear Filterについて
     # F_LNX.mainの戻り値は、線形フィルターカーネル全体と時間軸
-    # print("線形フィルターの計算を開始します...") # 最適化中は頻繁な出力は抑制
+    # print("線形フィルターの計算を開始します...")
     Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
 
     #畳み込みでチルダgの作成
@@ -137,7 +136,6 @@ def LNK_model(x, save_states=False):
     tild_g_full = np.convolve(Input, Linear_Filter_kernel, mode='full')
 
     # モデルの時間ステップ数に合わせるため、入力信号の長さに合わせる
-    # ここでは、Inputの長さ (80000) に合わせる
     g_len = len(Input)
     tild_g = tild_g_full[:g_len] # 適切な長さにスライス
 
@@ -171,7 +169,6 @@ def LNK_model(x, save_states=False):
     U_Nonlinear = N_LNK.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
         
     #Kineticモデル
-    # K_LNK.mainの引数を修正: time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
     # print("Kineticモデルの計算を開始します...")
     R_state, A_state, I1_state, I2_state ,check= K_LNK.main(
         len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start,
@@ -190,7 +187,7 @@ def LNK_model(x, save_states=False):
         # Outputとkeep_Postの長さを確認
         if len(Output) != len(keep_Post):
             tqdm.write(f"Warning: Length of Output ({len(Output)}) and calculated Post-synaptic potential ({len(keep_Post)}) do not match.")
-            # For correlation calculation, trim to the shorter length
+            # 相関計算では、短い方の長さに合わせる
             min_len = min(len(Output), len(keep_Post))
             Output_trimmed = Output[:min_len]
             keep_Post_trimmed = keep_Post[:min_len]
@@ -204,7 +201,7 @@ def LNK_model(x, save_states=False):
         # Kinetic model が失敗した場合、LNK_model側でメッセージを出力
         failed_lnk_model_runs += 1
         correlation = 1000.0 # 状態が不正な場合は大きなペナルティ
-        # K_LNK.mainからの戻り値がPartial R state length: ... の形式なので、それを利用する
+        # K_LNK.mainからの戻り値がPartial R state length: ... の形式
         # if R_state is not None: # R_stateがNoneでないことを確認
         #      tqdm.write(f"Kinetic model が失敗しました (LNK_run {total_lnk_model_runs}). Partial R state length: {len(R_state)}")
         # else:
@@ -241,7 +238,7 @@ def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, 
     # パラメータ用のディレクトリ (日付と時刻でユニークに)
     # 早期終了の場合は、ディレクトリ名に 'early_termination' を追加すると分かりやすい
     if is_early_termination:
-        param_results_dir = os.path.join(results_base_dir, date_str + "_early_termination")
+        param_results_dir = os.path.join(results_base_dir, date_str + "_ET")
     else:
         param_results_dir = os.path.join(results_base_dir, date_str)
     
@@ -261,7 +258,7 @@ def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, 
     save_results(optimal_correlation, os.path.join(param_results_dir, 'correlation.txt'))
 
     # 状態の保存 (最終結果としてのみ)
-    state_results_dir = os.path.join(param_results_dir, 'state') # パラメータディレクトリの下にstateディレクトリを作成
+    state_results_dir = os.path.join(param_results_dir, 'state')
     os.makedirs(state_results_dir, exist_ok=True)
     tqdm.write(f"状態を {state_results_dir} に保存中...")
     save_results(R_state, os.path.join(state_results_dir, 'R_state.txt'))
@@ -280,7 +277,7 @@ def save_intermediate_results(xk, convergence):
     global epoch_counter
     global current_epoch_best_fun_value # LNK_modelで更新された最新の目的関数値
     global previous_epoch_best_fun_value # 前回の最良目的関数値
-    global total_lnk_model_runs # Jの値を取得するために必要 (実際にはJは設定ファイルから取得)
+    global total_lnk_model_runs # グローバルカウンタ
     global Et # 早期終了フラグ  
     epoch_counter += 1
     
@@ -325,15 +322,17 @@ def save_intermediate_results(xk, convergence):
 
 
 def main(Try_bounds):
-    #差分進化法
-    # disp=True で進捗を表示
-    # updating='deferred' で更新を遅延させる
-    # maxiter=100 で最大反復回数を設定
-    # popsize=200 で個体群のサイズを設定
-    # strategy='rand1bin' で戦略を設定
-    # workers=-1 で全てのCPUコアを使用
-    # 差分進化アルゴリズムの目的関数呼び出し: 約 20,000 回 (maxiter * popsize)
-    # callback引数に中間結果保存関数を指定
+    """
+    差分進化法
+    disp=True で進捗を表示
+    updating='deferred' で更新を遅延させる
+    maxiter=100 で最大反復回数を設定
+    popsize=200 で個体群のサイズを設定
+    strategy='rand1bin' で戦略を設定
+    workers=-1 で全てのCPUコアを使用
+    差分進化アルゴリズムの目的関数呼び出し: 約 20,000 回 (maxiter * popsize)
+    callback引数に中間結果保存関数を指定
+    """
     print("差分進化法による最適化を開始します...")
     result = differential_evolution(LNK_model, Try_bounds, disp=True, updating = 'deferred', maxiter = 100, popsize = 200, strategy = 'rand1bin', workers=-1, callback=save_intermediate_results)
 
