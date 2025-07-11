@@ -21,6 +21,10 @@ def load_config(filepath):
         config = yaml.safe_load(file)
     return config
 
+# Docker環境では /app/src となる
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# プロジェクトのルートディレクトリを取得 (Docker環境では /app となる)
+project_root_dir = os.path.dirname(script_dir)
 
 # スクリプトのディレクトリを取得 (config_file_pathの構築に必要)
 config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
@@ -31,23 +35,19 @@ try:
     config = load_config(config_file_path)
 except FileNotFoundError:
     print(f"エラー: '{config_file_path}' が見つかりません。") # printに変更
-    raise 
+    raise
 except yaml.YAMLError as exc:
     print(f"YAMLファイルのパースエラー: {exc}") # printに変更
-    raise 
+    raise
 except KeyError as e:
     print(f"設定ファイルに予期せぬキーがありません: {e}") # printに変更
-    raise 
+    raise
 
 # グローバルカウンタ
 total_lnk_model_runs = 0
 failed_lnk_model_runs = 0
 date_str = time.strftime("%Y%m%d_%H")
 
-# Docker環境では /app/src となる
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# プロジェクトのルートディレクトリを取得 (Docker環境では /app となる)
-project_root_dir = os.path.dirname(script_dir)
 
 # エポックごとの保存のためのグローバル変数
 # current_epoch_best_fun_value は LNK_model が計算した最新の目的関数値を保持
@@ -78,7 +78,7 @@ def load_config(filepath):
 
 # 実験結果の保存 (NumPy配列の保存に対応するため修正)
 def save_results(data, filepath):
-    # print(f"結果を保存: {filepath}") 
+    # print(f"結果を保存: {filepath}")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     if isinstance(data, np.ndarray):
         # NumPy配列はnp.savetxtで保存
@@ -106,18 +106,18 @@ def LNK_model(x, save_states=False):
         A_start = config['A_start']
         I1_start = config['I_start'] # Assuming I_start corresponds to I1_start
         I2_start = 0.0 # Assuming I2_start is 0.0 as it's not in config
-        
+
         tau = config['tau']
     except KeyError as e:
         print(f"設定ファイルに必要なキーがありません: {e}")
         raise
 
-   
+
     # 線形フィルタパラメータ (x[0]からx[J-1])
     # x[J] は delta
     # x[J+1]からx[J+3-1] は 非線形パラメータ (a, b1, b2)
     # x[J+3]からx[J+3+3-1] は 動的パラメータ (ka, kfi, kfr)
-    
+
     alphas = x[0:J] # x[0]からx[J-1]までのJ個のパラメータ
     delta = x[J] # x[J]
     a_nonlinear = x[J+1] # x[J+1]
@@ -149,7 +149,7 @@ def LNK_model(x, save_states=False):
     #スケーリング定数を求めるためのパラメータ
     Record1 = 0
     Record2 = 0
-    
+
     #チルダgの計算（スケーリング前）
     # Inputとtild_gは同じ長さである必要がある
     if len(tild_g) != len(Input):
@@ -159,7 +159,7 @@ def LNK_model(x, save_states=False):
     # dtは合計の計算で考慮される
     Record1 = np.sum(tild_g * tild_g) * dt
     Record2 = np.sum(Input * Input) * dt
-    
+
     #スケーリング係数を求める
     if Record2 == 0:
         print("Error: Record2 is zero, cannot calculate scale_Linear. Input might be all zeros.")
@@ -168,7 +168,7 @@ def LNK_model(x, save_states=False):
 
     #スケーリング
     g = tild_g / scale_Linear
-    
+
     #Nonlinearモデル
     # print("非線形モデルの計算を開始します...")
     U_Nonlinear = N_LNK.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
@@ -187,8 +187,8 @@ def LNK_model(x, save_states=False):
     if check == 1:
         # OutputとResultの長さを合わせる必要がある
         # A_stateはU_Nonlinearと同じ長さになるはず
-        keep_Post = (-1) * A_state[:len(Output)] # Outputの長さに合わせる
-        
+        keep_Post = (-1) * A_state[:len(Output)]
+
         # Outputとkeep_Postの長さを確認
         if len(Output) != len(keep_Post):
             print(f"Warning: Length of Output ({len(Output)}) and calculated Post-synaptic potential ({len(keep_Post)}) do not match.")
@@ -199,11 +199,11 @@ def LNK_model(x, save_states=False):
             correlation, pvalue = spearmanr(Output_trimmed, keep_Post_trimmed)
         else:
             correlation, pvalue = spearmanr(Output, keep_Post)
-        
+
 
 
         # 最小化問題のため相関の負の値を返す
-        correlation = (-1) * correlation 
+        correlation = (-1) * correlation
     else:
         # print("Kinetic model が失敗しました.")
         failed_lnk_model_runs += 1 # Kineticモデルが失敗した場合は失敗としてマーク
@@ -217,7 +217,7 @@ def LNK_model(x, save_states=False):
             # tqdm.write(f"LNK_model の失敗回数/合計実行回数(失敗率): {failed_lnk_model_runs}/{total_lnk_model_runs} ({current_failure_rate:.2f}%)")
         else:
             tqdm.write("実行記録がありません。")
-            
+
     # コールバック関数で参照できるように、現在の目的関数値をグローバル変数に格納
     global current_epoch_best_fun_value
     current_epoch_best_fun_value = correlation
@@ -275,7 +275,7 @@ def save_intermediate_results(xk, convergence):
     global total_lnk_model_runs
 
     epoch_counter += 1
-    
+
     # 中間結果を保存するディレクトリ
     intermediate_results_dir = os.path.join(project_root_dir, 'results', 'Baccus_'+ data_options, date_str, 'epochs')
     os.makedirs(intermediate_results_dir, exist_ok=True)
@@ -285,8 +285,7 @@ def save_intermediate_results(xk, convergence):
     save_results(xk, params_filepath)
 
     # 現在の最良相関係数を保存 (LNK_modelで更新されたグローバル変数を使用)
-    correlation_filepath = os.path.join(intermediate_results_dir, f'epoch_{epoch_counter:03d}_correlation.txt')
-    save_results(-current_epoch_best_fun_value, correlation_filepath) # 負の値を正に戻して保存
+    save_results(-current_epoch_best_fun_value, os.path.join(intermediate_results_dir, f'epoch_{epoch_counter:03d}_correlation.txt')) # 負の値を正に戻して保存
 
     tqdm.write(f"--- Epoch {epoch_counter:03d} Results Saved (Correlation: {-current_epoch_best_fun_value:.4f}) at Total Runs: {total_lnk_model_runs} ---")
 
@@ -331,7 +330,7 @@ if __name__ == "__main__":
     #探索するパラメータの範囲
     #左からlinearのalphas 15個, delta, 非線形パラメータ3個 (a, b1, b2), 動的パラメータ3個 (ka, kfi, kfr)
     # total parameters: 15 (alphas) + 1 (delta) + 3 (nonlinear) + 3 (kinetic) = 22 parameters
-    
+
     # J = 15 alphas
     # x[0] to x[14] for alphas
     # x[15] for delta
