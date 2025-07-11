@@ -22,6 +22,6 @@ I_start: 0.001
 # 最適化の設定
 #  trueに設定すると、最適化が早期終了した場合の処理を行うが、局所解に陥る可能性がる。
 # Early termination flag (早期終了フラグ)
-Et: true
+Et: false
 # 収束判定のための許容誤差
 CONVERGENCE_TOLERANCE: 1e-6
