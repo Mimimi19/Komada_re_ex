@@ -54,10 +54,12 @@ date_str = time.strftime("%Y%m%d_%H")
 current_epoch_best_fun_value = 1000.0 # 最小化問題なので初期値は大きな値
 epoch_counter = 0 # エポックカウンター
 previous_epoch_best_fun_value = 1000.0 # 前回の最良目的関数値を保持 (初期値は大きな値)
-# 浮動小数点数の比較のための許容誤差
-CONVERGENCE_TOLERANCE = config['CONVERGENCE_TOLERANCE'] # 目標関数値がこの差以下であれば等しいと見なす
+# 浮動小数点数の比較のための許容誤差,strとして読み込まれる可能性があるのでfloatに変換
+CONVERGENCE_TOLERANCE = float(config['CONVERGENCE_TOLERANCE']) # 目標関数値がこの差以下であれば等しいと見なす
 Et = config['Et'] # Early termination flag (早期終了フラグ)
 
+#基底関数の数
+J = config['J'] # 基底関数の数 (J)
 # 提供データのインプット
 data_options = config['data_options']
 if data_options == "cb1":
@@ -100,9 +102,7 @@ def LNK_model(x, save_states=False):
         I1_start = config['I_start']
         I2_start = 0.0 # 今回は無視する
         
-        tau = config['tau']
-        #基底関数の数
-        J = config['J'] # 基底関数の数 (J)
+        tau = config['tau'] # 時定数
     except KeyError as e:
         tqdm.write(f"設定ファイルに必要なキーがありません: {e}") 
         raise 
@@ -227,7 +227,7 @@ def LNK_model(x, save_states=False):
         return correlation
 
 # 最適化結果を保存する関数 (最終結果用)
-def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, is_early_termination=False):
+def save_optimal_results(optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, J, is_early_termination=False):
     """
     最適化されたパラメータと対応する状態をファイルに保存します。
     この関数は最適化完了後に一度だけ呼び出されます。
@@ -308,7 +308,7 @@ def save_intermediate_results(xk, convergence):
         
         if A_state_final is not None:
             save_optimal_results(xk, -current_epoch_best_fun_value, # xkはコールバックの引数、目的関数値はグローバル変数
-                                 R_state_final, A_state_final, I1_state_final, I2_state_final,
+                                 R_state_final, A_state_final, I1_state_final, I2_state_final, J,
                                  is_early_termination=Et)
         else:
             tqdm.write("早期終了時のKineticモデル再実行が失敗したため、状態は保存されません。")
@@ -355,7 +355,7 @@ def main(Try_bounds):
         # 状態が正常に取得できた場合のみ保存
         if A_state_final is not None:
             save_optimal_results(optimal_params, optimal_correlation_value,
-                                 R_state_final, A_state_final, I1_state_final, I2_state_final)
+                                 R_state_final, A_state_final, I1_state_final, I2_state_final, J)
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
             print(f"最終的な相関係数: {optimal_correlation_value:.4f}")
