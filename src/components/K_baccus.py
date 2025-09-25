@@ -9,8 +9,8 @@ def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
     # 状態変数の更新を計算
     dR_dt = (-ka * R * u + kfr * I1) * dt
     dA_dt = (ka * R * u - kfi * A) * dt
-    dI1_dt = (kfi * A - kfr * I1 - ksi * I1) * dt
-    dI2_dt = (ksi * I1 - ksr * I2) * dt
+    dI1_dt = (kfi * A + ksr * I2 * u - kfr * I1 - ksi * I1) * dt
+    dI2_dt = (ksi * I1 - ksr * I2 * u) * dt
 
     # NumbaではリストではなくNumPy配列を返す方が効率的
     return np.array([dR_dt, dA_dt, dI1_dt, dI2_dt])

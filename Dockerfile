@@ -17,4 +17,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app
 ENV PYTHONPATH=/app:$PYTHONPATH
-CMD ["python", "/app/src/BaccusModel.py"]
+# CMD ["python", "/app/src/BaccusModel.py"]
+CMD ["python", "/app/src/plot_results.py"]
