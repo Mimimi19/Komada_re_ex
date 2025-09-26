@@ -1,2 +1,3 @@
 /src/components/*pyc*
-results/*
+scripts/*
+test/exercise/*
