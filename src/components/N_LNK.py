@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import numpy as np # math.exp の代わりに np.exp を使用
 
 def main(x_input, a, b1, b2):
@@ -15,7 +16,7 @@ if __name__ == "__main__":
     # --- 94-parents.txt の非線形パラメータ (Model 1) ---
     # a: x[J+1], b1: x[J+2], b2: x[J+3]
     # J=15を仮定 (config['J']から)
-    J = 15 
+    J = 15
     params_94_parents = np.array([
         0.992053, 0.057222, 0.214281, 0.240299, 0.425180,
         0.385704, 0.017517, 0.696799, 0.247215, 0.175373,

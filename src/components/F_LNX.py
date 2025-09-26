@@ -24,6 +24,7 @@ def main(alphas, delta, dt, tau, j, J=15):
     # 畳み込みようにフィルターを反転
     return kernel[::-1], t_values[::-1]
 
+# 適当に生成した動作確認用テストデータ
 if __name__ == "__main__":
     # Baccus.yamlから読み込むパラメータの例
     dt = 0.0002 # タイムステップ (s)

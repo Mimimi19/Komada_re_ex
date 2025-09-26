@@ -15,7 +15,7 @@ git clone -b 3-reset_result_location https://github.com/Mimimi19/Komada_re_ex.gi
 cd Re_experiment
 python3 -m venv venv
 source venv/bin/activate
-pip install tqdm numpy scipy pyyaml matplotlib numba
+pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core==1.0.4
 cd src
 python3 BaccusModel.py
 ```
