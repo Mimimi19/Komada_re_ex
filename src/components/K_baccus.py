@@ -1,3 +1,4 @@
+# K_baccus.py
 import numpy as np
 import tqdm
 import sys # sysモジュールは直接使わないが、コメントアウトで残す
@@ -68,12 +69,6 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
         keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
         
         # 状態のクリッピング: 状態変数を0から1の範囲に制限する
-        # スカラー値のクリッピングには np.maximum と np.minimum を組み合わせる
-        keep_R = np.maximum(0.0, np.minimum(keep_R, 1.0))
-        keep_A = np.maximum(0.0, np.minimum(keep_A, 1.0))
-        keep_I1 = np.maximum(0.0, np.minimum(keep_I1, 1.0))
-        keep_I2 = np.maximum(0.0, np.minimum(keep_I2, 1.0))
-        
         if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
             check = 0 # 異常フラグを設定
             # 計算が中断されたことを示すため、既に計算された部分の配列をスライスして返す
