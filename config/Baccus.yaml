@@ -1,27 +1,30 @@
+# config/config.yaml
+defaults:
 
-# 提供データのインプット
-data_options: "cb2" # cb1, cb2
+  - data: cb1 # デフォルトで使用するデータセット (cb1 or cb2)
+
+  - _self_
 
 # ハイパーパラメータの設定
+hyper_params:
 
-# 刻み幅
-dt: 0.20000000
+  # 刻み幅
+  dt: 0.0002 # 1/5000 s
 
-#Linear Filterのパラメータ
-J: 15
-tau: 30
+  # Linear Filterのパラメータ
+  J: 15
+  tau: 30
 
-# Nonlinear Filterのパラメータ
-b2: 1.0
+  # 初期初期占有率設定
+  R_start: 0.842
+  A_start: 0.157
+  I1_start: 0.001
+  I2_start: 0.000
 
-# 初期値設定のための初期値
-R_start: 0.842
-A_start: 0.157
-I_start: 0.001
-
-# 最適化の設定
-#  trueに設定すると、最適化が早期終了した場合の処理を行うが、局所解に陥る可能性がる。
-# Early termination flag (早期終了フラグ)
-Et: false
-# 収束判定のための許容誤差
-CONVERGENCE_TOLERANCE: 1e-6
+# 最適化の設定 (scipy.optimize.differential_evolution)
+optimization:
+  maxiter: 100
+  popsize: 200
+  strategy: 'rand1bin'
+  updating: 'deferred'
+  workers: -1 # 全てのCPUコアを使用

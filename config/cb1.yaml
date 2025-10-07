@@ -1,0 +1,3 @@
+name: "cb1"
+input_file: "data/cb1/wn_0.0002s.txt"
+output_file: "data/cb1/average80-86.txt"
