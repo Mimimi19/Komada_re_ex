@@ -10,7 +10,14 @@ def main(x_input, a, b1, b2):
     x_inputがNumPy配列の場合、要素ごとに計算が適用されます（ベクトル化）。
     """
     # np.exp はスカラーとNumPy配列の両方に対応し、要素ごとの計算を行う
-    return a / (1 + b1 * np.exp(-b2 * x_input))
+    # 1. np.exp() の引数を計算
+    z = -b2 * x_input
+    
+    # 2. ★オーバーフロー対策として引数をクリッピング★
+    # 709程度がオーバーフローの限界だが、安全のため700に制限。
+    # -700も設定しておくと、b1が小さい場合や分母が0に近づく場合（アンダーフロー）も防げる
+    z_capped = np.clip(z, a_min=-700.0, a_max=700.0) 
+    return a / (1 + b1 * np.exp(z_capped))
 
 if __name__ == "__main__":
     # --- 94-parents.txt の非線形パラメータ (Model 1) ---

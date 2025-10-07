@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import BasisFunctions as BasisFunctions
+import components.BasisFunctions as BasisFunctions
 
 
 def main(alphas, delta, t, dt, tau):
