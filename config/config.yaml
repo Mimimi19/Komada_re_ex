@@ -1,0 +1,31 @@
+# config/config.yaml
+defaults:
+
+  - data: cb1 # デフォルトで使用するデータセット (cb1 or cb2)
+
+  - _self_
+
+# ハイパーパラメータの設定
+hyper_params:
+
+  # 刻み幅
+  dt: 0.0002 # 1/5000 s
+
+  # Linear Filterのパラメータ
+  J: 15
+  tau: 30
+
+  # 初期初期占有率設定
+  R_start: 0.842
+  A_start: 0.157
+  I1_start: 0.001
+  I2_start: 0.000
+
+# 最適化の設定 (scipy.optimize.differential_evolution)
+optimization:
+  maxiter: 100
+  popsize: 200
+  strategy: 'rand1bin'
+  updating: 'deferred'
+  workers: 1 # 並列数。-1にすると全てのCPUコアを使用するが、tqdmの表示が乱れる。
+  # workers: -1 # 全てのCPUコアを使用

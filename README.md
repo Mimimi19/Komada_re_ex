@@ -1,13 +1,13 @@
 # Komada_re_ex
 
-# ローカルディレクトリで動かす場合は
+# ローカルディレクトリで動かす場合
 
 ```
 docker build -t baccus_model .
 docker run -v "$(pwd)/results:/app/results" baccus_model
 ```
 
-# ワークステーションで動かす場合は
+# ワークステーションで動かす場合
 
 ```
 cd ~
@@ -15,7 +15,17 @@ git clone -b 3-reset_result_location https://github.com/Mimimi19/Komada_re_ex.gi
 cd Re_experiment
 python3 -m venv venv
 source venv/bin/activate
-pip install tqdm numpy scipy pyyaml matplotlib numba
+pip install -r requirements.txt
 cd src
+#cb1の時
 python3 BaccusModel.py
+#cb2のとき
+python3 BaccusModel.py data=cb2
 ```
+
+<!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
+
+
+パラメータの定義いきをパラメータの動ける箇所をあぶり出し、足りないパラメータに割り当てる。
+目的関数がG分布に従わないようのスピアマン相関係数だから計算しなせ。
+\alpha を減らすこともできる、線形モデルの形から参照する過去がどの程度がをあぶり出し必要数のjを変更することで実現、また、リニアモデルのグラフは離散型地やから。分布図に直せ、ノンリニアもそう。 -->
