@@ -15,10 +15,12 @@ git clone -b 3-reset_result_location https://github.com/Mimimi19/Komada_re_ex.gi
 cd Re_experiment
 python3 -m venv venv
 source venv/bin/activate
-pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core==1.0.4
+pip install -r requirements.txt
 cd src
-python3 BaccusModel.py -m data=cb1,cb2 hydra/launcher=joblib hydra.launcher.n_jobs=-1
-
+#cb1の時
+python3 BaccusModel.py
+#cb2のとき
+python3 BaccusModel.py data=cb2
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが

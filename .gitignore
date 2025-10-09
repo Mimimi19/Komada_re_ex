@@ -1,3 +1,5 @@
 /src/components/*pyc*
 scripts/*
 test/exercise/*
+mlruns/*
+outputs/*

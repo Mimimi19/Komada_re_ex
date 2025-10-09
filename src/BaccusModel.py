@@ -30,8 +30,6 @@ def save_results(data, filepath):
 def flatten_dict_config(cfg: DictConfig) -> dict:
     """
     HydraのネストしたDictConfigをフラットなdictに変換します。
-    MLflowにパラメータを記録しやすくするためです。
-    例: {'data': {'name': 'exp1'}} -> {'data.name': 'exp1'}
     """
     # OmegaConf.to_containerを使用して、DictConfigをPythonのdictに変換
     d = OmegaConf.to_container(cfg, resolve=True)
@@ -42,7 +40,6 @@ def flatten_dict_config(cfg: DictConfig) -> dict:
         if isinstance(obj, dict):
             for k, v in obj.items():
                 _flatten(v, f'{prefix}{k}.')
-        # リストはフラット化せず、そのまま文字列として記録
         elif isinstance(obj, list):
             flat_d[prefix[:-1]] = str(obj)
         else:
@@ -77,21 +74,17 @@ class BaccusOptimizer:
         self.Output = np.genfromtxt(output_path)
         self.J = self.cfg.hyper_params.J
         
-        # 結果を保存するベースディレクトリを初期化
-        
         base_dir = get_original_cwd()
+        # self.results_dir のパスを修正し、重複した行を削除
         self.results_dir = os.path.join(base_dir, 'scripts', 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
-        
-        self.results_dir = os.path.join(base_dir, 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
         os.makedirs(self.results_dir, exist_ok=True)
-        print(f"\n結果は {self.results_dir} に保存されます。")
+        print(f"\n結果ファイルは {self.results_dir} に保存されます。")
 
     def lnk_model(self, x, save_states=False):
         """
         目的関数。与えられたパラメータxでモデルを評価します。
         """
         self.total_lnk_model_runs += 1
-
         try:
             hp = self.cfg.hyper_params
             dt, R_start, A_start, I1_start, I2_start, tau = \
@@ -141,8 +134,15 @@ class BaccusOptimizer:
                 return correlation, R_state, A_state, I1_state, I2_state
             else:
                 return correlation
-
         except Exception as e:
+            
+            ### ▼▼▼ デバッグのためにこの部分を追加 ▼▼▼ ###
+            print(f"\n!!!! lnk_modelでエラーが発生しました !!!!")
+            print(f"エラー内容: {e}")
+            import traceback
+            traceback.print_exc() # 詳細なエラー情報を表示
+            ### ▲▲▲ ここまで追加 ▲▲▲ ###
+            
             self.failed_lnk_model_runs += 1
             return 1.0  # エラー時は大きなペナルティを返す
 
@@ -155,20 +155,27 @@ class BaccusOptimizer:
         
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)
-
-        params_filepath = os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_params.txt')
-        save_results(xk, params_filepath)
-
-        corr_filepath = os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_correlation.txt')
-        save_results(correlation_value, corr_filepath)
+        save_results(xk, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_params.txt'))
+        save_results(correlation_value, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_correlation.txt'))
         
-        ### MLflow ###
-        # 各エポック（iteration）ごとの相関係数をメトリクスとして記録
-        # `step`引数でエポック数を指定することで、後で推移をグラフ化できる
-        mlflow.log_metric("intermediate_correlation", correlation_value, step=self.epoch_counter)
+        # 各エポックごとの全パラメータの値をメトリクスとして記録する
+        intermediate_params = {
+            **{f'L{i+1}': xk[i] for i in range(self.J)},
+            'delta': xk[self.J], 'a': xk[self.J+1], 'b1': xk[self.J+2], 'b2': xk[self.J+3],
+            'ka': xk[self.J+4], 'kfi': xk[self.J+5], 'kfr': xk[self.J+6], 'ksi': xk[self.J+7], 'ksr': xk[self.J+8]
+        }
+        
+        # mlflow.log_metrics を使って辞書の中身を一度に記録
+        # keyの先頭に "epoch_" をつけて、最終結果(optimal_)と区別する
+        metrics_to_log = {f"epoch_{k}": v for k, v in intermediate_params.items()}
+        metrics_to_log["epoch_correlation"] = correlation_value
+        mlflow.log_metrics(metrics_to_log, step=self.epoch_counter)
 
+        timestamp = time.strftime("%d_%H%M%S")
         tqdm.write(
-            f"--- Epoch {self.epoch_counter:03d} Saved | Correlation: {correlation_value:.4f} | Total Runs: {self.total_lnk_model_runs} ---"
+            # これ、workers=-1のせいで表示が乱れるから時間だけにする。
+            # f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {correlation_value:.4f} | Total Runs: {self.total_lnk_model_runs} ---"
+            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved ---"
         )
 
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
@@ -191,11 +198,15 @@ class BaccusOptimizer:
             'correlation': optimal_correlation
         }
 
+        # 最終的なパラメータをファイルに保存
         for name, val in param_map.items():
             save_results(val, os.path.join(self.results_dir, f'{name}.txt'))
-            
-            # 最終的な最適化パラメータと相関係数をMetricsとして記録
-            mlflow.log_metric(f"optimal_{name}", val)
+        save_results(optimal_correlation, os.path.join(self.results_dir, 'correlation.txt'))
+
+        # 最終的な値をMLflowのMetricsとして記録
+        final_metrics = {f"optimal_{k}": v for k, v in param_map.items()}
+        final_metrics["optimal_correlation"] = optimal_correlation
+        mlflow.log_metrics(final_metrics)
 
         state_dir = os.path.join(self.results_dir, 'state')
         os.makedirs(state_dir, exist_ok=True)
@@ -251,10 +262,7 @@ class BaccusOptimizer:
 
         if a_final is not None:
             self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final)
-            
-            # 結果が保存されたディレクトリ全体をArtifactsとして記録
             mlflow.log_artifacts(self.results_dir, artifact_path="results")
-            
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
             print(f"最終的な相関係数: {optimal_correlation:.4f}")
