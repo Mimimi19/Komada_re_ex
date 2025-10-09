@@ -137,13 +137,9 @@ class BaccusOptimizer:
             else:
                 return correlation
         except Exception as e:
-            
-            ### ▼▼▼ デバッグのためにこの部分を追加 ▼▼▼ ###
-            print(f"\n!!!! lnk_modelでエラーが発生しました !!!!")
             print(f"エラー内容: {e}")
             import traceback
             traceback.print_exc() # 詳細なエラー情報を表示
-            ### ▲▲▲ ここまで追加 ▲▲▲ ###
             
             self.failed_lnk_model_runs += 1
             return 1.0  # エラー時は大きなペナルティを返す
@@ -152,15 +148,16 @@ class BaccusOptimizer:
         """
         各エポックの終わりに呼び出されるコールバック関数。
         """
+        total_run = self.total_lnk_model_runs
         self.epoch_counter += 1
-        correlation_value = -self.current_epoch_best_fun_value
-        
+        current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)
         save_results(xk, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_params.txt'))
-        save_results(correlation_value, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_correlation.txt'))
+        save_results(current_best_correlation_value, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_correlation.txt'))
         
         # 各エポックごとの全パラメータの値をメトリクスとして記録する
+        
         intermediate_params = {
             **{f'L{i+1}': xk[i] for i in range(self.J)},
             'delta': xk[self.J], 'a': xk[self.J+1], 'b1': xk[self.J+2], 'b2': xk[self.J+3],
@@ -170,16 +167,14 @@ class BaccusOptimizer:
         # mlflow.log_metrics を使って辞書の中身を一度に記録
         # keyの先頭に "epoch_" をつけて、最終結果(optimal_)と区別する
         metrics_to_log = {f"epoch_{k}": v for k, v in intermediate_params.items()}
-        metrics_to_log["epoch_correlation"] = correlation_value
+        metrics_to_log["epoch_correlation"] = current_best_correlation_value
         mlflow.log_metrics(metrics_to_log, step=self.epoch_counter)
 
         timestamp = time.strftime("%d_%H%M%S")
         tqdm.write(
-            # これ、workers=-1のせいで表示が乱れるから時間だけにする。
-            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {correlation_value:.4f} | Total Runs: {self.total_lnk_model_runs} ---"
-            # f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved ---"
+            # 表示する値も再計算したものを使用する
+            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {current_best_correlation_value:.4f} | Total Runs: {total_run} ---"
         )
-
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
         """
         最終的な最適化結果を保存します。

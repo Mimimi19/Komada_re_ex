@@ -1,10 +1,8 @@
-# K_baccus.py
 import numpy as np
-import tqdm
-import sys # sysモジュールは直接使わないが、コメントアウトで残す
+import time # timeモジュールを追加
 from numba import jit # Numbaのjitデコレータをインポート
 
-# dP関数は純粋な数値計算なので、jitでコンパイルして高速化
+# dP関数は純粋な数値計算なので、jitでコンパイル
 @jit(nopython=True)
 def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
     # 状態変数の更新を計算
@@ -13,9 +11,46 @@ def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
     dI1_dt = (kfi * A + ksr * I2 * u - kfr * I1 - ksi * I1) * dt
     dI2_dt = (ksi * I1 - ksr * I2 * u) * dt
 
-    # NumbaではリストではなくNumPy配列を返す方が効率的
     return np.array([dR_dt, dA_dt, dI1_dt, dI2_dt])
 
+@jit(nopython=True)
+def _simulation_loop_jit(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr):
+
+    check = 1 # 計算が正常に完了したかどうかのフラグ
+    keep_R, keep_A, keep_I1, keep_I2 = R_start, A_start, I1_start, I2_start
+
+    R_state = np.zeros(time_steps)
+    A_state = np.zeros(time_steps)
+    I1_state = np.zeros(time_steps)
+    I2_state = np.zeros(time_steps)
+
+    R_state[0], A_state[0], I1_state[0], I2_state[0] = keep_R, keep_A, keep_I1, keep_I2
+
+    # 4状態の計算ループ (tqdmを削除)
+    for i in range(1, time_steps):
+        Runge1_R, Runge1_A, Runge1_I1, Runge1_I2 = dP(keep_R, keep_A, keep_I1, keep_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
+        Runge2_R, Runge2_A, Runge2_I1, Runge2_I2 = dP(keep_R + Runge1_R / 2, keep_A + Runge1_A / 2, keep_I1 + Runge1_I1 / 2, keep_I2 + Runge1_I2 / 2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
+        Runge3_R, Runge3_A, Runge3_I1, Runge3_I2 = dP(keep_R + Runge2_R / 2, keep_A + Runge2_A / 2, keep_I1 + Runge2_I1 / 2, keep_I2 + Runge2_I2 / 2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
+        Runge4_R, Runge4_A, Runge4_I1, Runge4_I2 = dP(keep_R + Runge3_R, keep_A + Runge3_A, keep_I1 + Runge3_I1, keep_I2 + Runge3_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
+        
+        keep_R += (Runge1_R + 2 * Runge2_R + 2 * Runge3_R + Runge4_R) / 6
+        keep_A += (Runge1_A + 2 * Runge2_A + 2 * Runge3_A + Runge4_A) / 6
+        keep_I1 += (Runge1_I1 + 2 * Runge2_I1 + 2 * Runge3_I1 + Runge4_I1) / 6
+        keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
+        
+        # 占有率が0-1の範囲外になった場合、計算を打ち切る
+        if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
+            check = 0 # 異常フラグ
+            # Numbaは異なるサイズの配列を返せないので、全体を返して後でスライスする
+            # ここで処理を中断
+            break
+            
+        R_state[i], A_state[i], I1_state[i], I2_state[i] = keep_R, keep_A, keep_I1, keep_I2
+    
+    # 失敗した場合は、失敗したインデックスも返す
+    # 正常終了時は i = time_steps - 1
+    last_idx = i
+    return R_state, A_state, I1_state, I2_state, check, last_idx
 
 def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr, label):
     """
@@ -34,78 +69,51 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     ksr: 超回復速度
     label: tqdmのdescに表示する追加ラベル
     """
-    check = 1 # 計算が正常に完了したかどうかのフラグ
-    # Kineticモデルの初期値設定
-    keep_R = R_start
-    keep_A = A_start
-    keep_I1 = I1_start
-    keep_I2 = I2_start
+    # ご要望2＆3: ラベルを表示し、改行せずにカーソルを先頭に戻す (\r)
+    # flush=Trueで、バッファリングされずにすぐ表示されるようにする
+    #end='\r'で描き終わったらカーソルを行頭に戻す
+    print(f'Running: K_Model({label})', end='\r', flush=True)
 
-    # 状態を保存するためのNumPy配列を事前に確保
-    
-    R_state = np.zeros(time_steps)
-    A_state = np.zeros(time_steps)
-    I1_state = np.zeros(time_steps)
-    I2_state = np.zeros(time_steps)
+    # Numbaで最適化されたコア計算ループを呼び出す
+    R_state, A_state, I1_state, I2_state, check, last_idx = _simulation_loop_jit(
+        time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr
+    )
 
-    # 初期値を配列の最初の要素に設定
-    R_state[0] = keep_R
-    A_state[0] = keep_A
-    I1_state[0] = keep_I1
-    I2_state[0] = keep_I2
+    # 計算が終わったら、"Running..."の表示を空白で上書きして消す
+    # 80文字分の空白で多くのターミナル幅をカバーできる
+    print(" " * 80, end='\r', flush=True)
 
-    # 4状態の計算ループ
-    for i in tqdm.tqdm(range(1, time_steps), leave=False, desc=f'K_Model({label})', mininterval=1.0):
-        # ルンゲ・クッタ法による次のタイムステップの状態変数の変化量を計算
-        Runge1_R, Runge1_A, Runge1_I1, Runge1_I2 = dP(keep_R, keep_A, keep_I1, keep_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
-        Runge2_R, Runge2_A, Runge2_I1, Runge2_I2 = dP(keep_R + Runge1_R / 2, keep_A + Runge1_A / 2, keep_I1 + Runge1_I1 / 2, keep_I2 + Runge1_I2 / 2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
-        Runge3_R, Runge3_A, Runge3_I1, Runge3_I2 = dP(keep_R + Runge2_R / 2, keep_A + Runge2_A / 2, keep_I1 + Runge2_I1 / 2, keep_I2 + Runge2_I2 / 2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
-        Runge4_R, Runge4_A, Runge4_I1, Runge4_I2 = dP(keep_R + Runge3_R, keep_A + Runge3_A, keep_I1 + Runge3_I1, keep_I2 + Runge3_I2, dt, u_input[i], ka, kfi, kfr, ksi, ksr)
-        
-        # 状態変数を更新
-        keep_R += (Runge1_R + 2 * Runge2_R + 2 * Runge3_R + Runge4_R) / 6
-        keep_A += (Runge1_A + 2 * Runge2_A + 2 * Runge3_A + Runge4_A) / 6
-        keep_I1 += (Runge1_I1 + 2 * Runge2_I1 + 2 * Runge3_I1 + Runge4_I1) / 6
-        keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
-        
-        # 状態のクリッピング: 状態変数を0から1の範囲に制限する
-        if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
-            check = 0 # 異常フラグを設定
-            # 計算が中断されたことを示すため、既に計算された部分の配列をスライスして返す
-            return R_state[:i+1], A_state[:i+1], I1_state[:i+1], I2_state[:i+1], check
-            
-        # 状態の保存: 事前に確保した配列の現在のインデックスに直接書き込む
-        R_state[i] = keep_R
-        A_state[i] = keep_A
-        I1_state[i] = keep_I1
-        I2_state[i] = keep_I2
-    
+    # 計算が途中で失敗した場合、結果を正しい長さでスライスする
+    if check == 0:
+        return R_state[:last_idx+1], A_state[:last_idx+1], I1_state[:last_idx+1], I2_state[:last_idx+1], check
+
     return R_state, A_state, I1_state, I2_state, check
+
 
 if __name__ == "__main__":
     # テスト用のパラメータ
     time_steps = 80000
-    u = np.random.rand(time_steps) # 0から1の一様乱数
+    u = np.random.rand(time_steps)
     dt = 0.0002
-    R = 1.0
-    A = 0.0
-    I1 = 0.0
-    I2 = 0.0
-    ka = 0.5
-    kfi = 0.1
-    kfr = 0.05
-    ksi = 0.02
-    ksr = 0.01
+    R, A, I1, I2 = 1.0, 0.0, 0.0, 0.0
+    ka, kfi, kfr, ksi, ksr = 0.5, 0.1, 0.05, 0.02, 0.01
+    
+    print("シミュレーションを開始します...")
+    start_time = time.time()
     
     # main関数を呼び出してシミュレーションを実行
     R_state, A_state, I1_state, I2_state, check = main(time_steps, u, dt, R, A, I1, I2, ka, kfi, kfr, ksi, ksr, label="test_run")
+    
+    end_time = time.time()
+    print(f"シミュレーションが完了しました。 (実行時間: {end_time - start_time:.4f}秒)")
+    
     print(f"Check status for K_baccus: {check}")
-    if check == 1: # 計算が正常に完了した場合のみ最終状態を表示
+    if check == 1:
         print(f"Last R state: {R_state[-1]}")
         print(f"Last A state: {A_state[-1]}")
         print(f"Last I1 state: {I1_state[-1]}")
         print(f"Last I2 state: {I2_state[-1]}")
-    else: # 計算が途中で失敗した場合
+    else:
         print("Kinetic model simulation failed early.")
         print(f"Partial R state length: {len(R_state)}")
         print("状態が範囲外になったため、計算が中断されました。")
