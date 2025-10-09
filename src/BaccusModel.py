@@ -66,6 +66,8 @@ class BaccusOptimizer:
         input_path = to_absolute_path(cfg.data.input_file)
         output_path = to_absolute_path(cfg.data.output_file)
         
+        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(f"最適化開始時間: {start_time}\n")
         print(f"データセット '{self.cfg.data.name}' を使用します。")
         print(f"入力データ: {input_path}")
         print(f"出力データ: {output_path}")
@@ -174,8 +176,8 @@ class BaccusOptimizer:
         timestamp = time.strftime("%d_%H%M%S")
         tqdm.write(
             # これ、workers=-1のせいで表示が乱れるから時間だけにする。
-            # f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {correlation_value:.4f} | Total Runs: {self.total_lnk_model_runs} ---"
-            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved ---"
+            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {correlation_value:.4f} | Total Runs: {self.total_lnk_model_runs} ---"
+            # f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved ---"
         )
 
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
