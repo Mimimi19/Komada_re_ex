@@ -69,7 +69,6 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     ksr: 超回復速度
     label: tqdmのdescに表示する追加ラベル
     """
-    # ご要望2＆3: ラベルを表示し、改行せずにカーソルを先頭に戻す (\r)
     # flush=Trueで、バッファリングされずにすぐ表示されるようにする
     #end='\r'で描き終わったらカーソルを行頭に戻す
     print(f'Running: K_Model({label})', end='\r', flush=True)
