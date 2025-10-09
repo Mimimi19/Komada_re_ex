@@ -27,4 +27,5 @@ optimization:
   popsize: 200
   strategy: 'rand1bin'
   updating: 'deferred'
-  workers: -1 # 全てのCPUコアを使用
+  workers: 1 # 並列数。-1にすると全てのCPUコアを使用するが、tqdmの表示が乱れる。
+  # workers: -1 # 全てのCPUコアを使用
