@@ -119,6 +119,11 @@ class BaccusOptimizer:
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
+            # print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+            if check == 1:
+                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+            else:
+                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # 4. Evaluation
             correlation = 1.0  # ペナルティ値
