@@ -1,11 +1,11 @@
 # requirements.txt
-tqdm==4.67.1
-numpy==1.26.4
-scipy==1.12.0
-pyyaml==6.0.2
-matplotlib==3.7.1
-numba==0.59.1
+tqdm
+numpy
+scipy
+pyyaml
+matplotlib
+numba
 hydra-core
 omegaconf
-antlr4-python3-runtime==4.9.3
+antlr4-python3-runtime
 mlflow
