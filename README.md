@@ -10,6 +10,7 @@ docker run -v "$(pwd)/results:/app/results" baccus_model
 # ワークステーションで動かす場合
 
 ```
+#cb1の時
 cd ~
 git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
@@ -17,9 +18,15 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cd src
-#cb1の時
 python3 BaccusModel.py
 #cb2のとき
+cd ~
+git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
+cd Re_experiment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cd src
 python3 BaccusModel.py data=cb2
 ```
 
