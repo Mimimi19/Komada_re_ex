@@ -17,7 +17,8 @@ python3 -m venv venv
 source venv/bin/activate
 pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core==1.0.4
 cd src
-python3 BaccusModel.py
+python3 BaccusModel.py -m data=cb1,cb2 hydra/launcher=joblib hydra.launcher.n_jobs=-1
+
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが

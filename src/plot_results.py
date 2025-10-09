@@ -12,7 +12,7 @@ import sys
 project_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # このファイル(__file__)の絶対パスのルートディレクトリを取得して一個上の階層を指定
 sys.path.append(project_root_dir)
 # これを追加することで、 以下のモジュールのインポートを簡単にする
-import components.F_LNX as F_LNX
+import components.F_LNK as F_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
@@ -85,7 +85,7 @@ def LNK_model_for_plot(x, Input_data_arg, Output_data_arg, dt, J, config_params)
     ksi_kinetic = 0.0
     ksr_kinetic = 0.0
 
-    Linear_Filter_kernel, _ = F_LNX.main(alphas, delta, dt, tau, J)
+    Linear_Filter_kernel, _ = F_LNK.main(alphas, delta, dt, tau, J)
     tild_g_full = np.convolve(Input_data_arg, Linear_Filter_kernel, mode='full')
     g_len = len(Input_data_arg)
     tild_g = tild_g_full[:g_len]
