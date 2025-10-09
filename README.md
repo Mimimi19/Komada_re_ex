@@ -16,18 +16,16 @@ git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-cd src
-python3 BaccusModel.py
+pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4-python3-runtime mlflow
+python3 src/BaccusModel.py
 #cb2のとき
 cd ~
 git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-cd src
-python3 BaccusModel.py data=cb2
+pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4-python3-runtime mlflow
+python3 src/BaccusModel.py data=cb2
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
