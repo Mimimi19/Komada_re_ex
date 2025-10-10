@@ -30,6 +30,7 @@ python3 src/BaccusModel.py data=cb2
 #別のターミナルを開いてログを表示
 tail -f scripts/lnk_model_debug.log | nl
 
+mlflow ui
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
