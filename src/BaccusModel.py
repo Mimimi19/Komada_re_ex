@@ -47,6 +47,12 @@ def flatten_dict_config(cfg: DictConfig) -> dict:
     _flatten(d)
     return flat_d
 
+import datetime
+try:
+    import zoneinfo
+except ImportError:
+    # Python 3.8など古い環境用のフォールバック
+    from backports import zoneinfo
 
 class BaccusOptimizer:
     """
@@ -56,6 +62,7 @@ class BaccusOptimizer:
         """
         コンストラクタ
         """
+        
         self.cfg = cfg
         self.total_lnk_model_runs = 0
         self.failed_lnk_model_runs = 0
@@ -67,6 +74,14 @@ class BaccusOptimizer:
         output_path = to_absolute_path(cfg.data.output_file)
         
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        
+         # タイムゾーンを'Asia/Tokyo'に指定して現在時刻を取得
+        jst = zoneinfo.ZoneInfo("Asia/Tokyo")
+        start_time = datetime.datetime.now(jst).strftime("%Y-%m-%d %H:%M:%S")
+        #debug用ログファイルの準備
+        log_path = os.path.join(get_original_cwd(), "scripts", "lnk_model_debug.log")
+        self.debug_log = open(log_path, "w")
+        
         print(f"最適化開始時間: {start_time}\n")
         print(f"データセット '{self.cfg.data.name}' を使用します。")
         print(f"入力データ: {input_path}")
@@ -120,11 +135,9 @@ class BaccusOptimizer:
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
             # print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
-            if check == 1:
-                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
-            else:
-                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
-
+            self.debug_log.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
+            self.debug_log.flush() # バッファをすぐに書き出す
+                
             # 4. Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
@@ -242,15 +255,15 @@ class BaccusOptimizer:
         
         opt_cfg = self.cfg.optimization
         result = differential_evolution(
-            self.lnk_model, 
-            try_bounds, 
-            disp=True,
-            updating=opt_cfg.updating, 
-            maxiter=opt_cfg.maxiter, 
-            popsize=opt_cfg.popsize, 
-            strategy=opt_cfg.strategy, 
-            workers=opt_cfg.workers, 
-            callback=self.save_intermediate_results
+            self.lnk_model,      # 目的関数（最小化したい関数）
+            try_bounds,          # 探索するパラメータの範囲（各変数の上下限）
+            disp=True,           # 途中経過を表示する
+            updating=opt_cfg.updating,   # 並列計算や更新方法の設定
+            maxiter=opt_cfg.maxiter,     # 最大繰り返し回数
+            popsize=opt_cfg.popsize,     # 個体数（探索候補の数）
+            strategy=opt_cfg.strategy,   # 差分進化の戦略（mutation の方法）
+            workers=opt_cfg.workers,     # 並列実行のためのスレッド・プロセス数
+            callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
         )
 
         print("\n最適化が完了しました。")
