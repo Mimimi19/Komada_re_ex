@@ -68,20 +68,21 @@ class BaccusOptimizer:
         self.failed_lnk_model_runs = 0
         self.current_epoch_best_fun_value = 1000.0  # 最小化問題なので初期値は大きな値
         self.epoch_counter = 0
-        self.date_str = time.strftime("%Y%m%d_%H")
         
         input_path = to_absolute_path(cfg.data.input_file)
         output_path = to_absolute_path(cfg.data.output_file)
         
-        start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        
-         # タイムゾーンを'Asia/Tokyo'に指定して現在時刻を取得
+        # タイムゾーンを'Asia/Tokyo'に指定して現在時刻を取得
         jst = zoneinfo.ZoneInfo("Asia/Tokyo")
         start_time = datetime.datetime.now(jst).strftime("%Y-%m-%d %H:%M:%S")
+        self.date_str = time.strftime("%Y%m%d_%H")
+        
         #debug用ログファイルの準備
         log_path = os.path.join(get_original_cwd(), "scripts", "lnk_model_debug.log")
-        self.debug_log = open(log_path, "w")
-        
+        self.debug_log_path = log_path
+        with open(self.debug_log_path, "w") as f:
+            f.write("LNK Model Debug Log\n")
+            
         print(f"最適化開始時間: {start_time}\n")
         print(f"データセット '{self.cfg.data.name}' を使用します。")
         print(f"入力データ: {input_path}")
@@ -135,9 +136,9 @@ class BaccusOptimizer:
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
             # print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
-            self.debug_log.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
-            self.debug_log.flush() # バッファをすぐに書き出す
-                
+            with open(self.debug_log_path, "a") as f:
+                f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
+
             # 4. Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
@@ -166,7 +167,7 @@ class BaccusOptimizer:
         """
         各エポックの終わりに呼び出されるコールバック関数。
         """
-        total_run = self.total_lnk_model_runs
+        
         self.epoch_counter += 1
         current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
@@ -191,7 +192,7 @@ class BaccusOptimizer:
         timestamp = time.strftime("%d_%H%M%S")
         tqdm.write(
             # 表示する値も再計算したものを使用する
-            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {current_best_correlation_value:.4f} | Total Runs: {total_run} ---"
+            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {current_best_correlation_value:.4f} ---"
         )
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
         """
