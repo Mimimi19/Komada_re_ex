@@ -28,6 +28,7 @@ pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4
 python3 src/BaccusModel.py data=cb2
 
 #別のターミナルを開いてログを表示
+cd Re_experiment/
 tail -f scripts/lnk_model_debug.log | nl
 
 #MLflow
