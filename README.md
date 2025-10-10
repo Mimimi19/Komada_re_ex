@@ -28,7 +28,8 @@ pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4
 python3 src/BaccusModel.py data=cb2
 
 #別のターミナルを開いてログを表示
-tail -f scripts/lnk_model_debug.log
+tail -f scripts/lnk_model_debug.log | nl
+
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
