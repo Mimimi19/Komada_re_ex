@@ -6,6 +6,7 @@ import pprint
 import numpy as np
 from scipy.stats import spearmanr
 from scipy.optimize import differential_evolution
+from scipy.signal import fftconvolve
 from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -126,7 +127,7 @@ class BaccusOptimizer:
             print("これからLに入る")
             # 1. Linear Filter
             linear_filter_kernel, _ = F_LNK.main(alphas, delta, t, dt, tau)
-            g_t = np.convolve(self.Input[:t], linear_filter_kernel, mode='same')
+            g_t = fftconvolve(self.Input[:t], linear_filter_kernel, mode='same')
             print("これからNに入る")
             # 2. Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, b1_nonlinear, b2_nonlinear)
