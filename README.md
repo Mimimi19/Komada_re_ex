@@ -30,6 +30,10 @@ python3 src/BaccusModel.py data=cb2
 #別のターミナルを開いてログを表示
 tail -f scripts/lnk_model_debug.log | nl
 
+#MLflow
+cd Re_experiment/
+source venv/bin/activate
+cd scripts
 mlflow ui
 ```
 
