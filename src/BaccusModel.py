@@ -102,6 +102,7 @@ class BaccusOptimizer:
         """
         目的関数。与えられたパラメータxでモデルを評価します。
         """
+        print("lnk_modelに入った")
         self.total_lnk_model_runs += 1
         try:
             hp = self.cfg.hyper_params
@@ -121,14 +122,15 @@ class BaccusOptimizer:
             ksr_kinetic = x[J+8]
 
             t = min(len(self.Input), len(self.Output))
-            
+
+            print("これからLに入る")
             # 1. Linear Filter
             linear_filter_kernel, _ = F_LNK.main(alphas, delta, t, dt, tau)
             g_t = np.convolve(self.Input[:t], linear_filter_kernel, mode='same')
-
+            print("これからNに入る")
             # 2. Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, b1_nonlinear, b2_nonlinear)
-
+            print("これからKに入る")
             # 3. Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
@@ -138,7 +140,7 @@ class BaccusOptimizer:
             # print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
             with open(self.debug_log_path, "a") as f:
                 f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
-
+            print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}")
             # 4. Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
@@ -148,7 +150,7 @@ class BaccusOptimizer:
                 correlation = -1 * correlation  # 最小化のため
             else:
                 self.failed_lnk_model_runs += 1
-
+            print(f"DE法の目的関数値 (相関係数): { -correlation } (Run: {self.total_lnk_model_runs}, Failed: {self.failed_lnk_model_runs})")
             self.current_epoch_best_fun_value = correlation
 
             if save_states:
@@ -313,12 +315,4 @@ def main(cfg: DictConfig):
         optimizer.run()
 
 if __name__ == "__main__":
-    # 並列処理の開始方法を 'spawn' に指定する
-    import multiprocessing as mp
-    try:
-        mp.set_start_method('spawn', force=True)
-        print("--- Set multiprocessing start method to 'spawn' ---")
-    except RuntimeError:
-        # すでに設定されている場合は何もしない
-        pass
     main()
