@@ -253,6 +253,21 @@ class BaccusOptimizer:
             (0.001, 0.1)   # ksr (kinetic)
         ]
         
+        # パラメータ探索範囲(try_bounds)をMLflowに記録する
+        param_names = [f'L{i+1}' for i in range(self.J)] + [
+            'delta', 'a', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
+        ]
+
+        #MLflowに記録するための辞書を作成
+        bounds_to_log = {}
+        for name, bound_tuple in zip(param_names, try_bounds):
+            # (下限, 上限) のタプルを文字列に変換して辞書に追加
+            # キーの先頭に 'bound_' をつけて、他のパラメータと区別する
+            bounds_to_log[f"bound_{name}"] = str(bound_tuple)
+        
+        # 作成した辞書をに記録
+        mlflow.log_params(bounds_to_log)
+        
         print(f"Number of parameters to optimize: {len(try_bounds)}")
         print("差分進化法による最適化を開始します...")
         
