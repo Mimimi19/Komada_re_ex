@@ -191,7 +191,7 @@ class BaccusOptimizer:
         metrics_to_log["epoch_correlation"] = current_best_correlation_value
         mlflow.log_metrics(metrics_to_log, step=self.epoch_counter)
 
-        timestamp = time.strftime("%d_%H%M%S")
+        timestamp = time.strftime("%d_%H:%M:%S")
         tqdm.write(
             # 表示する値も再計算したものを使用する
             f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {current_best_correlation_value:.4f} ---"
