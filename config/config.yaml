@@ -23,8 +23,8 @@ hyper_params:
 
 # 最適化の設定 (scipy.optimize.differential_evolution)
 optimization:
-  maxiter: 100
-  popsize: 200
-  strategy: 'rand1bin'
-  updating: 'deferred'
+  maxiter: 100 # 最大繰り返し回数
+  popsize: 200 # 個体数 (探索候補の数)
+  strategy: 'rand1bin' # 差分進化の戦略
+  updating: 'deferred' # 並列計算の更新方法
   workers: -1 # 全てのCPUコアを使用
