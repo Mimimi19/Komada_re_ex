@@ -27,8 +27,9 @@ source venv/bin/activate
 pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4-python3-runtime mlflow
 python3 src/BaccusModel.py data=cb2
 
-別のターミナルを開いてログを表示
-tail -f scripts/lnk_model_debug.log
+#別のターミナルを開いてログを表示
+tail -f scripts/lnk_model_debug.log | awk '{print NR ": " $0}'
+
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
