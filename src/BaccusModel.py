@@ -313,4 +313,12 @@ def main(cfg: DictConfig):
         optimizer.run()
 
 if __name__ == "__main__":
+    # 並列処理の開始方法を 'spawn' に指定する
+    import multiprocessing as mp
+    try:
+        mp.set_start_method('spawn', force=True)
+        print("--- Set multiprocessing start method to 'spawn' ---")
+    except RuntimeError:
+        # すでに設定されている場合は何もしない
+        pass
     main()
