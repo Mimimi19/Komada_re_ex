@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
-import numpy as np # math.exp の代わりに np.exp を使用
+import numpy as np
+from scipy.special import erf
 
 def main(x_input, a, kappa, b1, b2, ka):
     """
@@ -13,7 +14,7 @@ def main(x_input, a, kappa, b1, b2, ka):
     ka: スケーリングパラメータ, 活性化密度関数
     x_inputがNumPy配列の場合、要素ごとに計算が適用されます（ベクトル化）。
     """
-    erf_result = np.erf(kappa*x_input +b1) +1
+    erf_result = erf(kappa*x_input +b1) +1
     return (a**erf_result)*ka /2 + b2
 if __name__ == "__main__":
     # --- 94-parents.txt の非線形パラメータ (Model 1) ---
