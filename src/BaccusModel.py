@@ -12,6 +12,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
+from dotenv import load_dotenv
 import components.L_LNK as L_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
@@ -330,6 +331,23 @@ def main(cfg: DictConfig):
     Hydraによって呼び出されるメイン関数。
     """
     original_cwd = get_original_cwd()
+    # httpsを突破するために ca.crt を指定
+    ca_cert_path = os.path.join(original_cwd, 'ca.crt')
+    # .env ファイルからNASのURLを読み込む
+    dotenv_path = os.path.join(original_cwd, '.env')
+    load_dotenv(dotenv_path)
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        # .env に設定があった場合
+        print(f"MLflowの保存先をNAS ({tracking_uri}) に設定します。")
+        mlflow.set_tracking_uri(tracking_uri)
+    else:
+        # .env に設定がなかった場合 (フォールバック)
+        print(f"警告: .envファイルまたは MLFLOW_TRACKING_URI が見つかりません。")
+        print("フォールバック: ローカルの 'scripts/mlruns' を使用します。")
+        mlruns_path = os.path.join(original_cwd, 'scripts', 'mlruns')
+        mlflow.set_tracking_uri(f"file:{mlruns_path}")
+        
     mlruns_path = os.path.join(original_cwd, 'scripts', 'mlruns')
     mlflow.set_tracking_uri(f"file:{mlruns_path}")
     
