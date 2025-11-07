@@ -12,7 +12,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
-import components.F_LNK as F_LNK
+import components.L_LNK as L_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
 
@@ -113,21 +113,22 @@ class BaccusOptimizer:
             alphas = x[0:J]
             delta = x[J]
             a_nonlinear = x[J+1]
-            b1_nonlinear = x[J+2]
-            b2_nonlinear = x[J+3]
-            ka_kinetic = x[J+4]
-            kfi_kinetic = x[J+5]
-            kfr_kinetic = x[J+6]
-            ksi_kinetic = x[J+7]
-            ksr_kinetic = x[J+8]
+            kappa_nonlinear = x[J+2]
+            b1_nonlinear = x[J+3]
+            b2_nonlinear = x[J+4]
+            ka_kinetic = x[J+5]
+            kfi_kinetic = x[J+6]
+            kfr_kinetic = x[J+7]
+            ksi_kinetic = x[J+8]
+            ksr_kinetic = x[J+9]
 
             t = min(len(self.Input), len(self.Output))
 
             # 1. Linear Filter
-            linear_filter_kernel, _ = F_LNK.main(alphas, delta, t, dt, tau)
+            linear_filter_kernel, _ = L_LNK.main(alphas, delta, t, dt, tau)
             g_t = fftconvolve(self.Input[:t], linear_filter_kernel, mode='same')
             # 2. Nonlinear Model
-            u_t = N_LNK.main(g_t, a_nonlinear, b1_nonlinear, b2_nonlinear)
+            u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear)
             # 3. Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
@@ -181,8 +182,8 @@ class BaccusOptimizer:
         
         intermediate_params = {
             **{f'L{i+1}': xk[i] for i in range(self.J)},
-            'delta': xk[self.J], 'a': xk[self.J+1], 'b1': xk[self.J+2], 'b2': xk[self.J+3],
-            'ka': xk[self.J+4], 'kfi': xk[self.J+5], 'kfr': xk[self.J+6], 'ksi': xk[self.J+7], 'ksr': xk[self.J+8]
+            'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
+            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9]
         }
         
         # mlflow.log_metrics を使って辞書の中身を一度に記録
@@ -206,13 +207,14 @@ class BaccusOptimizer:
             **{f'L{i+1}': optimal_params[i] for i in range(self.J)},
             'delta': optimal_params[self.J],
             'a': optimal_params[self.J+1],
-            'b1': optimal_params[self.J+2],
-            'b2': optimal_params[self.J+3],
-            'ka': optimal_params[self.J+4],
-            'kfi': optimal_params[self.J+5],
-            'kfr': optimal_params[self.J+6],
-            'ksi': optimal_params[self.J+7],
-            'ksr': optimal_params[self.J+8],
+            'kappa': optimal_params[self.J+2],
+            'b1': optimal_params[self.J+3],
+            'b2': optimal_params[self.J+4],
+            'ka': optimal_params[self.J+5],
+            'kfi': optimal_params[self.J+6],
+            'kfr': optimal_params[self.J+7],
+            'ksi': optimal_params[self.J+8],
+            'ksr': optimal_params[self.J+9],
             'correlation': optimal_correlation
         }
 
@@ -239,23 +241,43 @@ class BaccusOptimizer:
         """
         最適化プロセスを実行します。
         """
+        epsilon = 1e-6 # 非常に小さい正の値を定義
+        J = self.J
+        
         try_bounds = [
-            (-1.0, 2.0) for _ in range(self.J)  # alphas (L1-L15)
+            # --- 1. 線形フィルター F_LNK (16個) ---
+            # alphas (L1-L15): 論文に制約なし。
+            (-5.0, 5.0) for _ in range(J)
         ] + [
-            (0.05, 1.0),   # delta
-            (0.1, 10.0),   # a (nonlinear)
-            (0.0, 5.0),    # b1 (nonlinear)
-            (-1.0, 0.0),   # b2 (nonlinear)
-            (-0.01, 2.0),  # ka (kinetic)
-            (0.5, 5.0),    # kfi (kinetic)
-            (-0.01, 0.3),  # kfr (kinetic)
-            (0.001, 0.1),  # ksi (kinetic)
-            (0.001, 0.1)   # ksr (kinetic)
+            # delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義
+            (0.0, 0.002),   
+            
+            # --- 2. 非線形関数 N_LNK (4個) ---
+            # a: 論文で (0.0, 20.0) と定義
+            (0.0, 20.0),   
+            # kappa: 論文に制約なし。
+            (0.0, 5.0),    
+            # b1: 論文に制約なし。
+            (0.0, 5.0),    
+            # b2: 論文に制約なし。
+            (-1.0, 0.0),   
+            
+            # --- 3. キネティクスブロック (5個) ---
+            # ka: 論文で「正であること」と定義。図5D(23-131)を参考に上限を設定。
+            (epsilon, 200.0),  
+            # kfi: 論文で「正であること」と定義。図5D(8-50)を参考に上限を設定。
+            (epsilon, 100.0),  
+            # kfr: 論文で「正であること」と定義。図5D(1.4-87)を参考に上限を設定。
+            (epsilon, 100.0),  
+            # ksi: 論文で「正であること」と定義。図5D(0.3-6)を参考に上限を設定。
+            (epsilon, 10.0),   
+            # ksr: 論文で「正」かつ「1.0 s^-1 より遅い(小さい)」と定義。
+            (epsilon, 1.0)    
         ]
         
         # パラメータ探索範囲(try_bounds)をMLflowに記録する
         param_names = [f'L{i+1}' for i in range(self.J)] + [
-            'delta', 'a', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
+            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
         ]
 
         #MLflowに記録するための辞書を作成

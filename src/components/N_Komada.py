@@ -1,20 +1,24 @@
 from matplotlib import pyplot as plt
 import numpy as np # math.exp の代わりに np.exp を使用
 
-def main(x_input, a, kappa, b1, b2, ka):
+def main(x_input, a, b1, b2):
     """
     非線形モデルの計算を行います。
     x_input: 入力値（スカラーまたはNumPy配列）
-    a, kappa, b1, b2: 非線形パラメータ、
-    a:シグモイド関数の指数部に含まれるパラメーター。この指数は $0$ から $20$ の間で変化します
-    b1：入力に対するオフセット（閾値）を制御するパラメーター。
-    kappa：入力のスケール（傾きや鋭さ）**を制御するパラメーター。
-    b2: 関数の出力オフセットを制御するパラメーター
-    ka: スケーリングパラメータ, 活性化密度関数
+    a, b1, b2: 非線形パラメータ
+
     x_inputがNumPy配列の場合、要素ごとに計算が適用されます（ベクトル化）。
     """
-    erf_result = np.erf(kappa*x_input +b1) +1
-    return (a**erf_result)*ka /2 + b2
+    # np.exp はスカラーとNumPy配列の両方に対応し、要素ごとの計算を行う
+    # 1. np.exp() の引数を計算
+    z = -b2 * x_input
+    
+    # 2. ★オーバーフロー対策として引数をクリッピング★
+    # 709程度がオーバーフローの限界だが、安全のため700に制限。
+    # -700も設定しておくと、b1が小さい場合や分母が0に近づく場合（アンダーフロー）も防げる
+    z_capped = np.clip(z, a_min=-700.0, a_max=700.0) 
+    return a / (1 + b1 * np.exp(z_capped))
+
 if __name__ == "__main__":
     # --- 94-parents.txt の非線形パラメータ (Model 1) ---
     # a: x[J+1], b1: x[J+2], b2: x[J+3]

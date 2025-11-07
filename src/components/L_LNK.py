@@ -1,8 +1,23 @@
-# F_LNK.py
+# L_LNK.py
 import numpy as np
 import matplotlib.pyplot as plt
+from numba import jit
 
 import components.BasisFunctions as BasisFunctions
+
+@jit(nopython=True)
+def Gram_Schmidt(vectors):
+    """与えられたベクトル集合を正規直交化するGram-Schmidt過程"""
+    orthonormal_basis = []
+    for v in vectors:
+        w = v.copy()
+        for u in orthonormal_basis:
+            proj = np.dot(w, u) / np.dot(u, u) * u
+            w -= proj
+        norm = np.linalg.norm(w)
+        if norm > 1e-10:  # ゼロベクトルでない場合のみ追加
+            orthonormal_basis.append(w / norm)
+    return np.array(orthonormal_basis)
 
 
 def main(alphas, delta, t, dt, tau):
@@ -30,7 +45,7 @@ def main(alphas, delta, t, dt, tau):
     # 2. 全ての基底関数の計算 (j=1 から J まで)
     # f_x_matrix の shape は (J-1) x len(shifted_t)
     f_x_matrix = BasisFunctions.main(shifted_t, J , tau)
-
+    f_x_matrix = Gram_Schmidt(f_x_matrix)
     # 4. カーネルの計算 F_LNK (t) = Σ α_j f_x(t, j)
     kernel = np.dot(alphas, f_x_matrix)
 
