@@ -12,8 +12,8 @@ import sys
 project_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # このファイル(__file__)の絶対パスのルートディレクトリを取得して一個上の階層を指定
 sys.path.append(project_root_dir)
 # これを追加することで、 以下のモジュールのインポートを簡単にする
-import components.F_LNK as F_LNK
-import components.N_LNK as N_LNK
+import components.L_LNK as L_LNK
+import components.N_Komada as N_Komada
 import components.K_baccus as K_LNK
 
 # 設定ファイルを読み込む関数
@@ -85,7 +85,7 @@ def LNK_model_for_plot(x, Input_data_arg, Output_data_arg, dt, J, config_params)
     ksi_kinetic = 0.0
     ksr_kinetic = 0.0
 
-    Linear_Filter_kernel, _ = F_LNK.main(alphas, delta, dt, tau, J)
+    Linear_Filter_kernel, _ = L_LNK.main(alphas, delta, dt, tau, J)
     tild_g_full = np.convolve(Input_data_arg, Linear_Filter_kernel, mode='full')
     g_len = len(Input_data_arg)
     tild_g = tild_g_full[:g_len]
@@ -100,7 +100,7 @@ def LNK_model_for_plot(x, Input_data_arg, Output_data_arg, dt, J, config_params)
 
     g = tild_g / scale_Linear
 
-    U_Nonlinear = N_LNK.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
+    U_Nonlinear = N_Komada.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
 
     R_state, A_state, I1_state, I2_state, check_raw = K_LNK.main(
         len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start,
