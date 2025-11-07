@@ -128,7 +128,7 @@ class BaccusOptimizer:
             linear_filter_kernel, _ = L_LNK.main(alphas, delta, t, dt, tau)
             g_t = fftconvolve(self.Input[:t], linear_filter_kernel, mode='same')
             # 2. Nonlinear Model
-            u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear)
+            u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
             # 3. Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,

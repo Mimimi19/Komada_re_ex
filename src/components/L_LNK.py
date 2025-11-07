@@ -8,16 +8,32 @@ import components.BasisFunctions as BasisFunctions
 @jit(nopython=True)
 def Gram_Schmidt(vectors):
     """与えられたベクトル集合を正規直交化するGram-Schmidt過程"""
-    orthonormal_basis = []
-    for v in vectors:
+    #     結果を格納するためのNumPy配列をあらかじめ確保する(入力と同じ形状で、空の配列を作成)
+    orthonormal_basis = np.empty_like(vectors)
+    
+    # 有効な（ゼロベクトルでない）基底の数をカウントする
+    count = 0
+    
+    for i in range(vectors.shape[0]):
+        v = vectors[i]
         w = v.copy()
-        for u in orthonormal_basis:
-            proj = np.dot(w, u) / np.dot(u, u) * u
+        
+        # 4. すでに見つかった基底 (count個) を使って直交化する
+        for j in range(count):
+            u = orthonormal_basis[j]
+            # Gram-Schmidtの射影計算
+            # proj = np.dot(w, u) / np.dot(u, u) * u
+            proj = np.dot(w, u) * u 
             w -= proj
+            
         norm = np.linalg.norm(w)
-        if norm > 1e-10:  # ゼロベクトルでない場合のみ追加
-            orthonormal_basis.append(w / norm)
-    return np.array(orthonormal_basis)
+        
+        if norm > 1e-10:  # ゼロベクトルでない場合
+            orthonormal_basis[count] = w / norm
+            count += 1
+            
+    # 有効な基底だけをスライスして返す
+    return orthonormal_basis[:count]
 
 
 def main(alphas, delta, t, dt, tau):

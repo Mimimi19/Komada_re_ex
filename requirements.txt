@@ -1,11 +1,11 @@
 # requirements.txt
-tqdm
-numpy
+tqdm 
+numpy 
 scipy
-pyyaml
-matplotlib
-numba
-hydra-core
-omegaconf
-antlr4-python3-runtime
+pyyaml 
+matplotlib 
+numba 
+hydra-core 
+omegaconf 
+antlr4-python3-runtime 
 mlflow
