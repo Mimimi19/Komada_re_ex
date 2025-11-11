@@ -11,21 +11,15 @@ docker run -v "$(pwd)/results:/app/results" baccus_model
 
 ```
 #cb1の時
-cd ~
 git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
-python3 -m venv venv
-source venv/bin/activate
-pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4-python3-runtime mlflow
-python3 src/BaccusModel.py
+uv add -r requirements.txt
+uv run src/BaccusModel.py data=Ucb1
 #cb2のとき
-cd ~
 git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
-python3 -m venv venv
-source venv/bin/activate
-pip install tqdm numpy scipy pyyaml matplotlib numba hydra-core omegaconf antlr4-python3-runtime mlflow
-python3 src/BaccusModel.py data=cb2
+uv add -r requirements.txt
+uv run src/BaccusModel.py data=Ucb2
 
 #別のターミナルを開いてログを表示
 cd Re_experiment/

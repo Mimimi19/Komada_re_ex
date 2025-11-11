@@ -338,11 +338,9 @@ def main(cfg: DictConfig):
     load_dotenv(dotenv_path)
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
     if tracking_uri:
-        # .env に設定があった場合
         print(f"MLflowの保存先をNAS ({tracking_uri}) に設定します。")
         mlflow.set_tracking_uri(tracking_uri)
     else:
-        # .env に設定がなかった場合 (フォールバック)
         print(f"警告: .envファイルまたは MLFLOW_TRACKING_URI が見つかりません。")
         print("フォールバック: ローカルの 'scripts/mlruns' を使用します。")
         mlruns_path = os.path.join(original_cwd, 'scripts', 'mlruns')

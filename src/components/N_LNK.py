@@ -1,7 +1,8 @@
+# src/components/N_LNK.py
+
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.special import erf
-
 def main(x_input, a, kappa, b1, b2, ka):
     """
     非線形モデルの計算を行います。
@@ -17,6 +18,7 @@ def main(x_input, a, kappa, b1, b2, ka):
     erf_result = erf(kappa*x_input +b1) +1
     return (a**erf_result)*ka /2 + b2
 
+# --- if __name__ == "__main__": 以下は変更なし ---
 if __name__ == "__main__":
     # a: x[J+1], kappa: x[J+2], b1: x[J+3], b2: x[J+4], ka: x[J+5]
     J = 15
