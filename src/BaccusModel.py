@@ -12,7 +12,6 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
-from dotenv import load_dotenv
 import requests
 from dotenv import load_dotenv
 import components.L_LNK as L_LNK
@@ -244,39 +243,30 @@ class BaccusOptimizer:
         """
         最適化プロセスを実行します。
         """
-        epsilon = 1e-6 # 非常に小さい正の値を定義
+        # Configからパラメータ境界(param_bounds)を取得
+        pb = self.cfg.hyper_params.param_bounds
         J = self.J
         
-        try_bounds = [
-            # --- 1. 線形フィルター F_LNK (16個) ---
-            # alphas (L1-L15): 論文に制約なし。
-            (-5.0, 5.0) for _ in range(J)
-        ] + [
-            # delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義
-            (0.0, 0.002),   
-            
-            # --- 2. 非線形関数 N_LNK (4個) ---
-            # a: 論文で (0.0, 20.0) と定義
-            (0.0, 20.0),   
-            # kappa: 論文に制約なし。
-            (0.0, 5.0),    
-            # b1: 論文に制約なし。
-            (0.0, 5.0),    
-            # b2: 論文に制約なし。
-            (-1.0, 0.0),   
-            
-            # --- 3. キネティクスブロック (5個) ---
-            # ka: 論文で「正であること」と定義。図5D(23-131)を参考に上限を設定。
-            (epsilon, 200.0),  
-            # kfi: 論文で「正であること」と定義。図5D(8-50)を参考に上限を設定。
-            (epsilon, 100.0),  
-            # kfr: 論文で「正であること」と定義。図5D(1.4-87)を参考に上限を設定。
-            (epsilon, 100.0),  
-            # ksi: 論文で「正であること」と定義。図5D(0.3-6)を参考に上限を設定。
-            (epsilon, 10.0),   
-            # ksr: 論文で「正」かつ「1.0 s^-1 より遅い(小さい)」と定義。
-            (epsilon, 1.0)    
-        ]
+        # alphas (L1-L15) の境界を生成
+        alpha_bounds_tuple = tuple(pb.LinearFilter.alphas)
+        try_bounds = [alpha_bounds_tuple] * J
+        
+        #    Configのリスト [min, max] を tuple(min, max) に変換
+        try_bounds.extend([
+            # LinearFilter
+            tuple(pb.LinearFilter.delta),
+            # Nonlinear
+            tuple(pb.Nonlinear.a),
+            tuple(pb.Nonlinear.kappa),
+            tuple(pb.Nonlinear.b1),
+            tuple(pb.Nonlinear.b2),
+            # Kinetics
+            tuple(pb.Kinetics.ka),
+            tuple(pb.Kinetics.kfi),
+            tuple(pb.Kinetics.kfr),
+            tuple(pb.Kinetics.ksi),
+            tuple(pb.Kinetics.ksr)
+        ])
         
         # パラメータ探索範囲(try_bounds)をMLflowに記録する
         param_names = [f'L{i+1}' for i in range(self.J)] + [
@@ -333,27 +323,43 @@ def main(cfg: DictConfig):
     Hydraによって呼び出されるメイン関数。
     """
     original_cwd = get_original_cwd()
-    # httpsを突破するために ca.crt を指定
+    # httpsを突破するために CA証明書のパスを定義
     ca_cert_path = os.path.join(original_cwd, 'ca.crt')
+    if os.path.exists(ca_cert_path):
+        os.environ['REQUESTS_CA_BUNDLE'] = ca_cert_path
+        print(f"カスタムCA証明書を読み込みました: {ca_cert_path}")
+    else:
+        print(f"警告: CA証明書ファイルが見つかりません: {ca_cert_path}")
     # .env ファイルからNASのURLを読み込む
     dotenv_path = os.path.join(original_cwd, '.env')
     load_dotenv(dotenv_path)
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
-    requests.get(tracking_uri, verify=ca_cert_path)  # SSL証明書の検証に ca.crt を使用
+    
     if tracking_uri:
         print(f"MLflowの保存先をNAS ({tracking_uri}) に設定します。")
         mlflow.set_tracking_uri(tracking_uri)
+            
     else:
         print(f"警告: .envファイルまたは MLFLOW_TRACKING_URI が見つかりません。")
         print("フォールバック: ローカルの 'scripts/mlruns' を使用します。")
         mlruns_path = os.path.join(original_cwd, 'scripts', 'mlruns')
         mlflow.set_tracking_uri(f"file:{mlruns_path}")
         
-    mlruns_path = os.path.join(original_cwd, 'scripts', 'mlruns')
-    mlflow.set_tracking_uri(f"file:{mlruns_path}")
-    
-    # 1. Experiment（実験）を設定。同じ名前の実験はグループ化される
-    mlflow.set_experiment(f"Baccus_Optimization_{cfg.data.name}")
+    try:
+        # 5. Experiment（実験）を設定。
+        mlflow.set_experiment(f"Baccus_Optimization_{cfg.data.name}")
+        
+    except requests.exceptions.SSLError as e:
+        print("\n--- SSL接続エラー ---")
+        print("MLflowサーバーへの接続に失敗しました。ca.crtが正しいか、VPNが接続されているか確認してください。")
+        print(f"詳細: {e}")
+        # エラーが発生したらプログラムを終了する
+        raise
+    except requests.exceptions.ConnectionError as e:
+        print("\n--- ネットワーク接続エラー ---")
+        print("MLflowサーバーへの接続に失敗しました。VPNが接続されているか、.envのURLが正しいか確認してください。")
+        print(f"詳細: {e}")
+        raise
 
     # 2. Run（実行）を開始。with文を使うと、ブロックを抜ける際に自動で終了処理が行われる
     # run_nameで、UIに表示される実行の名前を設定
