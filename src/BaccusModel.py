@@ -13,6 +13,8 @@ from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
 from dotenv import load_dotenv
+import requests
+from dotenv import load_dotenv
 import components.L_LNK as L_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
@@ -337,6 +339,7 @@ def main(cfg: DictConfig):
     dotenv_path = os.path.join(original_cwd, '.env')
     load_dotenv(dotenv_path)
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    requests.get(tracking_uri, verify=ca_cert_path)  # SSL証明書の検証に ca.crt を使用
     if tracking_uri:
         print(f"MLflowの保存先をNAS ({tracking_uri}) に設定します。")
         mlflow.set_tracking_uri(tracking_uri)
