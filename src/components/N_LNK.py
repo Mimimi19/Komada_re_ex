@@ -6,7 +6,7 @@ from numba import jit
 import math
 
 @jit(nopython=True, cache=True) # 👈 [修正4] Numba JITデコレータを追加
-def main(x_input, a, kappa, b1, b2, ka):
+def error_function(x_input, a, kappa, b1, b2, ka):
     """
     非線形モデルの計算を行います。(Numba JIT版)
     x_input: 入力値（スカラーまたはNumPy配列）
@@ -18,7 +18,6 @@ def main(x_input, a, kappa, b1, b2, ka):
     ka: スケーリングパラメータ, 活性化密度関数
     x_inputがNumPy配列の場合、要素ごとに計算が適用されます（ベクトル化）。
     """
-    
     
     # 出力配列を入力と同じ形状で初期化
     out_array = np.empty_like(x_input, dtype=np.float64)
@@ -35,6 +34,12 @@ def main(x_input, a, kappa, b1, b2, ka):
             out_array[i] = (a**erf_result) * ka / 2 + b2
             
     return out_array
+
+def main(x_input, a, kappa, b1, b2, ka):
+    
+    print(f"             - Nonlinear Model -                is being processed.", end='\r', flush=True)
+    
+    return error_function(x_input, a, kappa, b1, b2, ka)
 
 # --- if __name__ == "__main__": 以下は変更なし ---
 if __name__ == "__main__":
