@@ -142,6 +142,7 @@ class BaccusOptimizer:
                 f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
                 
             if check == 1:
+                
                 print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
             else:
                 print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
@@ -314,7 +315,31 @@ class BaccusOptimizer:
 
         print("\n最適化が完了しました。")
         pprint.pprint(result)
+        
+        print("\n--- 検証統計 ---")
+        
+        # 成功した実行回数を計算
+        successful_runs = self.total_lnk_model_runs - self.failed_lnk_model_runs
+        
+        # 成功率を計算 (ゼロ除算を回避)
+        if self.total_lnk_model_runs > 0:
+            success_rate = (successful_runs / self.total_lnk_model_runs) * 100.0
+        else:
+            success_rate = 0.0  # 実行がなかった場合
 
+        # ターミナルに表示
+        print(f"総試行回数 (total_lnk_model_runs): {self.total_lnk_model_runs}")
+        print(f"成功回数 (check=1): {successful_runs}")
+        print(f"失敗回数 (check=0 or Error): {self.failed_lnk_model_runs}")
+        print(f"成功率: {success_rate:.2f}%")
+        
+        # MLflowにメトリクスとして保存
+        mlflow.log_metric("final_total_runs", self.total_lnk_model_runs)
+        mlflow.log_metric("final_successful_runs", successful_runs)
+        mlflow.log_metric("final_success_rate_percent", success_rate)
+        
+        print("検証統計をMLflowに保存しました。")
+        
         optimal_params = result.x
         optimal_correlation = -result.fun
 
