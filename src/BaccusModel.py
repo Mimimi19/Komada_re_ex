@@ -83,6 +83,7 @@ class BaccusOptimizer:
         #debug用ログファイルの準備
         log_path = os.path.join(get_original_cwd(), "scripts", "lnk_model_debug.log")
         self.debug_log_path = log_path
+        os.makedirs(os.path.dirname(self.debug_log_path), exist_ok=True)
         with open(self.debug_log_path, "w") as f:
             f.write("LNK Model Debug Log\n")
             
@@ -389,8 +390,4 @@ def main(cfg: DictConfig):
         optimizer.run()
 
 if __name__ == "__main__":
-    # Numbaのマルチプロセス実行時の問題を回避するために'spawn'方式を強制
-    import multiprocessing
-    multiprocessing.set_start_method('spawn', force=True)
-    
     main()
