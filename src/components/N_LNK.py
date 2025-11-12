@@ -5,7 +5,7 @@ import numpy as np
 from numba import jit
 import math
 
-@jit(nopython=True, cache=True) # 👈 [修正4] Numba JITデコレータを追加
+@jit(nopython=True, cache=True) 
 def error_function(x_input, a, kappa, b1, b2, ka):
     """
     非線形モデルの計算を行います。(Numba JIT版)
@@ -37,7 +37,7 @@ def error_function(x_input, a, kappa, b1, b2, ka):
 
 def main(x_input, a, kappa, b1, b2, ka):
     
-    print(f"             - Nonlinear Model -                is being processed.", end='\r', flush=True)
+    # print(f"             - Nonlinear Model -                is being processed.", end='\r', flush=True)
     
     return error_function(x_input, a, kappa, b1, b2, ka)
 
