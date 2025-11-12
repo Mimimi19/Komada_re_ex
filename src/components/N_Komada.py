@@ -9,6 +9,8 @@ def main(x_input, a, b1, b2):
 
     x_inputがNumPy配列の場合、要素ごとに計算が適用されます（ベクトル化）。
     """
+    
+    print(f"             - Nonlinear Model -                is being processed.", end='\r', flush=True)
     # np.exp はスカラーとNumPy配列の両方に対応し、要素ごとの計算を行う
     # 1. np.exp() の引数を計算
     z = -b2 * x_input

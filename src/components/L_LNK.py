@@ -48,7 +48,7 @@ def main(alphas, delta, t, dt, tau):
     - kernel[::-1]: 畳み込み用に反転されたカーネル
     - t_values[::-1]: 反転された時間軸
     """
-    
+    print(f"Linear Model -                 -                is being processed.", end='\r', flush=True)
     # alphasの長さが基底関数の総数 J となります
     J = len(alphas) 
     

@@ -71,7 +71,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     """
     # flush=Trueで、バッファリングされずにすぐ表示されるようにする
     #end='\r'で描き終わったらカーソルを行頭に戻す
-    print(f'Running: K_Model({label})', end='\r', flush=True)
+    print(f"             -                 - Kinetics Model ({label}) is being processed.", end='\r', flush=True)
 
     # Numbaで最適化されたコア計算ループを呼び出す
     R_state, A_state, I1_state, I2_state, check, last_idx = _simulation_loop_jit(
