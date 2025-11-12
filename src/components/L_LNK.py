@@ -1,40 +1,44 @@
 # L_LNK.py
 import numpy as np
 import matplotlib.pyplot as plt
-from numba import jit
 
 import components.BasisFunctions as BasisFunctions
 
-@jit(nopython=True, cache=True)
-def Gram_Schmidt(vectors):
-    """与えられたベクトル集合を正規直交化するGram-Schmidt過程"""
-    #     結果を格納するためのNumPy配列をあらかじめ確保する(入力と同じ形状で、空の配列を作成)
-    orthonormal_basis = np.empty_like(vectors)
+def QR_orthogonalization(vectors):
+    """
+    QR分解を用いて、高速かつ安定的に正規直交基底を求めます。
     
-    # 有効な（ゼロベクトルでない）基底の数をカウントする
-    count = 0
-    
-    for i in range(vectors.shape[0]):
-        v = vectors[i]
-        w = v.copy()
-        
-        # 4. すでに見つかった基底 (count個) を使って直交化する
-        for j in range(count):
-            u = orthonormal_basis[j]
-            # Gram-Schmidtの射影計算
-            # proj = np.dot(w, u) / np.dot(u, u) * u
-            proj = np.dot(w, u) * u 
-            w -= proj
-            
-        norm = np.linalg.norm(w)
-        
-        if norm > 1e-10:  # ゼロベクトルでない場合
-            orthonormal_basis[count] = w / norm
-            count += 1
-            
-    # 有効な基底だけをスライスして返す
-    return orthonormal_basis[:count]
+    np.linalg.qr は「列ベクトル」を直交化するため、
+    入力 'vectors' (J, N) の「行ベクトル」を直交化するために
+    一度転置(T)してからQR分解を実行し、結果を再び転置して返します。
 
+    Args:
+        vectors (np.ndarray): (J, N) の形状の配列。
+                              J個の行ベクトルを正規直交化します。
+
+    Returns:
+        np.ndarray: (J, N) の形状の正規直交化されたベクトル（行ベクトル）。
+    """
+    
+    # 1. (J, N) -> (N, J) へ転置
+    #    QR分解が列ベクトル (J個) を処理できるようにするため。
+    A = vectors.T
+    
+    # 2. QR分解を実行 (A = QR)
+    #    Q は (N, J) の形状となり、その「列」が正規直交基底です。
+    #    mode='reduced' は効率的な計算のために指定します。
+    try:
+        Q, R = np.linalg.qr(A, mode='reduced')
+    except np.linalg.LinAlgError:
+        # 入力ベクトルが線形従属などでQR分解に失敗した場合のフォールバック
+        print("Warning: QR decomposition failed. Returning original vectors.")
+        return vectors
+        
+    # 3. (N, J) -> (J, N) へ転置
+    #    元の形状に戻し、「行」が正規直交基底となるようにします。
+    orthogonal_vectors = Q.T
+    
+    return orthogonal_vectors
 
 def main(alphas, delta, t, dt, tau):
     """
@@ -61,7 +65,7 @@ def main(alphas, delta, t, dt, tau):
     # 2. 全ての基底関数の計算 (j=1 から J まで)
     # f_x_matrix の shape は (J-1) x len(shifted_t)
     f_x_matrix = BasisFunctions.main(shifted_t, J , tau)
-    f_x_matrix = Gram_Schmidt(f_x_matrix)
+    f_x_matrix = QR_orthogonalization(f_x_matrix)
     # 4. カーネルの計算 F_LNK (t) = Σ α_j f_x(t, j)
     kernel = np.dot(alphas, f_x_matrix)
 
