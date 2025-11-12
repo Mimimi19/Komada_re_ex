@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numba import jit
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def f_x(t, j, tau):
     f_x = np.zeros_like(t, dtype=np.float64) # 出力配列の初期化
     
@@ -12,7 +12,7 @@ def f_x(t, j, tau):
     return f_x
 
 # 基底関数を定義するモジュール　
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def main(t, J, tau):
     t_len = t.shape[0]
     results_matrix = np.empty((J, t_len), dtype=np.float64)

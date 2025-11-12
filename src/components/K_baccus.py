@@ -3,7 +3,7 @@ import time # timeモジュールを追加
 from numba import jit # Numbaのjitデコレータをインポート
 
 # dP関数は純粋な数値計算なので、jitでコンパイル
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
     # 状態変数の更新を計算
     dR_dt = (-ka * R * u + kfr * I1) * dt
@@ -13,7 +13,7 @@ def dP(R, A, I1, I2, dt, u, ka, kfi, kfr, ksi, ksr):
 
     return np.array([dR_dt, dA_dt, dI1_dt, dI2_dt])
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def _simulation_loop_jit(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr):
 
     check = 1 # 計算が正常に完了したかどうかのフラグ
