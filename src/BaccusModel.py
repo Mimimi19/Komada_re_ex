@@ -243,6 +243,18 @@ class BaccusOptimizer:
         """
         最適化プロセスを実行します。
         """
+        # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
+        print("Numba JITコンパイラのウォームアップ中...")
+        try:
+            # ダミーのパラメータ配列 (長さ: J + 10) を作成
+            x_dummy = np.ones(self.J + 10) 
+            # 目的関数を一度だけ実行して、コンパイルを強制する
+            self.lnk_model(x_dummy, save_states=False)
+            print("ウォームアップ完了。最適化を開始します。")
+        except Exception as e:
+            print(f"警告: ウォームアップ中にエラーが発生しました: {e}")
+            # エラーが起きても、本番の最適化は続行してみる
+            
         # Configからパラメータ境界(param_bounds)を取得
         pb = self.cfg.hyper_params.param_bounds
         J = self.J
@@ -377,4 +389,8 @@ def main(cfg: DictConfig):
         optimizer.run()
 
 if __name__ == "__main__":
+    # Numbaのマルチプロセス実行時の問題を回避するために'spawn'方式を強制
+    import multiprocessing
+    multiprocessing.set_start_method('spawn', force=True)
+    
     main()

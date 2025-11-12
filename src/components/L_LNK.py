@@ -5,7 +5,7 @@ from numba import jit
 
 import components.BasisFunctions as BasisFunctions
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def Gram_Schmidt(vectors):
     """与えられたベクトル集合を正規直交化するGram-Schmidt過程"""
     #     結果を格納するためのNumPy配列をあらかじめ確保する(入力と同じ形状で、空の配列を作成)
