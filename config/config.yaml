@@ -17,10 +17,10 @@ hyper_params:
   tau: 30
 
   # 初期初期占有率設定
-  R_start: 0.842
-  A_start: 0.157
-  I1_start: 0.001
-  I2_start: 0.000
+  R_start: 0.050
+  A_start: 0.050
+  I1_start: 0.400
+  I2_start: 0.500
 
   # パラメータの定義域
   param_bounds:
