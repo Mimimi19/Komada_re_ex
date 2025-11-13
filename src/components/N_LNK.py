@@ -26,12 +26,12 @@ def error_function(x_input, a, kappa, b1, b2, ka):
     if x_input.ndim == 0:
         # 入力がスカラーの場合
         erf_result = math.erf(kappa * x_input + b1) + 1
-        out_array[()] = (a**erf_result) * ka / 2 + b2 # スカラー配列への代入
+        out_array[()] = (a**erf_result)  / ka + b2 # スカラー配列への代入
     else:
         # 入力が配列の場合
         for i in range(x_input.shape[0]):
             erf_result = math.erf(kappa * x_input[i] + b1) + 1
-            out_array[i] = (a**erf_result) * ka / 2 + b2
+            out_array[i] = (a**erf_result) / ka + b2
             
     return out_array
 
