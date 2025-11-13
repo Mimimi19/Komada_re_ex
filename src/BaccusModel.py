@@ -331,7 +331,7 @@ class BaccusOptimizer:
             updating=opt_cfg.updating,   # 並列計算や更新方法の設定
             maxiter=opt_cfg.maxiter,     # 最大繰り返し回数
             popsize=opt_cfg.popsize,     # 個体数（探索候補の数）
-            strategy=opt_cfg.strategy,   # 差分進化の戦略（mutation の方法）
+            strategy=de_strategy_str,  # 差分進化の戦略（mutation の方法）
             workers=opt_cfg.workers,     # 並列実行のためのスレッド・プロセス数
             callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
         )
