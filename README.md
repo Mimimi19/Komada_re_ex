@@ -10,14 +10,16 @@ docker run -v "$(pwd)/results:/app/results" baccus_model
 # ワークステーションで動かす場合
 
 ```
-#cb1の時
 git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 cd Re_experiment
+
+.envとca.crtの設定
+
+#cb1の時
 uv add -r requirements.txt
 uv run src/BaccusModel.py data=Ucb1
+
 #cb2のとき
-git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
-cd Re_experiment
 uv add -r requirements.txt
 uv run src/BaccusModel.py data=Ucb2
 
@@ -30,6 +32,18 @@ cd Re_experiment/
 source venv/bin/activate
 cd scripts
 mlflow ui
+
+DE法の戦略を変える場合
+DE/rand/1/bin がデフォルト
+
+optimization.strategy.mutation=
+rand  best  randtobest  currenttobest
+
+optimization.strategy.n_vectors=1  or  2
+
+optimization.strategy.crossover=bin  or  exp
+例：DE/best/2/bin　data=Ucb2
+uv run src/BaccusModel.py data=Ucb2 optimization.strategy.mutation=best optimization.strategy.n_vectors=2 optimization.strategy.crossover=bin
 ```
 
 <!-- シミュレーションが終わらなくて、最新の学習データで再現したモデルなのですが
