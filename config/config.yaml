@@ -16,11 +16,9 @@ hyper_params:
   J: 15
   tau: 30
 
-  # 初期初期占有率設定
-  R_start: 0.050
-  A_start: 0.050
-  I1_start: 0.400
-  I2_start: 0.500
+  # true: I2, ksi, ksr を最適化対象に含める
+  # false: I2, ksi, ksr を強制的に 0.0 にする
+  use_I2: true
 
   # パラメータの定義域
   param_bounds:
@@ -38,13 +36,19 @@ hyper_params:
       kfr: [1e-6, 100.0] # kfr: 論文で「正であること」と定義。図5D(1.4-87)を参考に上限を設定。
       ksi: [1e-6, 10.0] # ksi: 論文で「正であること」と定義。図5D(0.3-6)を参考に上限を設定。
       ksr: [1e-6, 1.0] # ksr: 論文で「正」かつ「1.0 s^-1 より遅い(小さい)」と定義。
+    InitialStates:
+      # (0.0, 1.0) の範囲で探索
+      p_R: [0.0, 1.0]
+      p_A: [0.0, 1.0]
+      p_I1: [0.0, 1.0]
+      p_I2: [0.0, 1.0] # use_I2: false の場合、(0.0, 0.0) に上書きされます
 
 
 
 # 差分化進化法の設定
 optimization:
   maxiter: 500 # 最大繰り返し回数
-  popsize: 100 # 個体数 (探索候補の数)
+  popsize: 50 # 個体数 (探索候補の数)
   updating: 'deferred' # 並列計算の更新方法
   workers: -1 # 全てのCPUコアを使用
 
