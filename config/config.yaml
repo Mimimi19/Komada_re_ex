@@ -5,6 +5,7 @@ defaults:
 
   - _self_
 
+
 # ハイパーパラメータの設定
 hyper_params:
 
@@ -22,7 +23,7 @@ hyper_params:
   I2_start: 0.000
 
   # パラメータの定義域
-  param_bounds: 
+  param_bounds:
     LinearFilter:
       alphas: [-5.0, 5.0]  ## alphas (L1-L15): 論文に制約なし。
       delta: [0.0, 0.002] #  delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義
@@ -39,10 +40,19 @@ hyper_params:
       ksr: [1e-6, 1.0] # ksr: 論文で「正」かつ「1.0 s^-1 より遅い(小さい)」と定義。
 
 
-# 最適化の設定 (scipy.optimize.differential_evolution)
+
+# 差分化進化法の設定
 optimization:
-  maxiter: 100 # 最大繰り返し回数
-  popsize: 200 # 個体数 (探索候補の数)
-  strategy: 'rand1bin' # 差分進化の戦略
-  updating: 'deferred' # 並列計算の更新方法
-  workers: -1 # 全てのCPUコアを使用
+  maxiter: 1000
+  popsize: 15
+  updating: 'deferred'
+  workers: -1
+
+  # strategy を辞書に変更し、デフォルトを 'DE/rand/1/bin' (rand1bin) に設定
+  strategy:
+    # 'rand', 'best', 'randtobest', 'currenttobest' など
+    mutation: 'rand'
+    # 差分ベクトルの数 (通常 1 または 2)
+    n_vectors: 1
+    # 'bin' (binomial) または 'exp' (exponential)
+    crossover: 'bin'

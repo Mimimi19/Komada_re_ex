@@ -127,12 +127,12 @@ class BaccusOptimizer:
 
             t = min(len(self.Input), len(self.Output))
 
-            # 1. Linear Filter
+            # Linear Filter
             linear_filter_kernel, _ = L_LNK.main(alphas, delta, t, dt, tau)
             g_t = fftconvolve(self.Input[:t], linear_filter_kernel, mode='same')
-            # 2. Nonlinear Model
+            # Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
-            # 3. Kinetic Model
+            # Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
@@ -147,7 +147,7 @@ class BaccusOptimizer:
             else:
                 print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
-            # 4. Evaluation
+            # Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
                 keep_post = A_state[:t]
@@ -301,6 +301,29 @@ class BaccusOptimizer:
         print("差分進化法による最適化を開始します...")
         
         opt_cfg = self.cfg.optimization
+        # Hydra設定からstrategyコンポーネントを取得
+        try:
+            strategy_cfg = opt_cfg.strategy
+            mutation = strategy_cfg.mutation
+            n_vectors = strategy_cfg.n_vectors
+            crossover = strategy_cfg.crossover
+            
+            # scipy.optimize.differential_evolution が要求する strategy 文字列を組み立てる
+            # 例: 'rand', 1, 'bin' -> 'rand1bin'
+            # 例: 'best', 2, 'exp' -> 'best2exp'
+            de_strategy_str = f"{mutation}{n_vectors}{crossover}"
+            
+            # 組み立てた戦略をログに出力
+            print(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')")
+            with open(self.debug_log_path, "a") as f:
+                    f.write(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')\n")
+                    
+        except Exception as e:
+            print(f"エラー: 'optimization.strategy' の設定が不正です。")
+            print("config.yaml で mutation, n_vectors, crossover が正しく設定されているか確認してください。")
+            print(f"詳細: {e}")
+            raise # エラーが発生したら最適化を実行せずに終了
+        
         result = differential_evolution(
             self.lnk_model,      # 目的関数（最小化したい関数）
             try_bounds,          # 探索するパラメータの範囲（各変数の上下限）
@@ -384,7 +407,7 @@ def main(cfg: DictConfig):
         mlflow.set_tracking_uri(f"file:{mlruns_path}")
         
     try:
-        # 5. Experiment（実験）を設定。
+        # Experiment（実験）を設定。
         mlflow.set_experiment(f"Baccus_Optimization_{cfg.data.name}")
         
     except requests.exceptions.SSLError as e:
@@ -398,19 +421,36 @@ def main(cfg: DictConfig):
         print("MLflowサーバーへの接続に失敗しました。VPNが接続されているか、.envのURLが正しいか確認してください。")
         print(f"詳細: {e}")
         raise
+    # Hydra設定から戦略コンポーネントを取得
+    try:
+        strategy_cfg = cfg.optimization.strategy
+        mutation = strategy_cfg.mutation
+        n_vectors = strategy_cfg.n_vectors
+        crossover = strategy_cfg.crossover
+        
+        # MLflowの実行名(run_name)用に 'rand/1/bin' 形式の文字列を組み立てる
+        strategy_str_for_name = f"{mutation}/{n_vectors}/{crossover}"
+        
+    except Exception as e:
+        print(f"警告: 'optimization.strategy' の設定が不正です。run_nameにデフォルト文字列を使用します。")
+        print(f"詳細: {e}")
+        strategy_str_for_name = "unknown_strategy" # フォールバック
 
-    # 2. Run（実行）を開始。with文を使うと、ブロックを抜ける際に自動で終了処理が行われる
+    # 戦略文字列と日付を使って run_name を定義
+    run_name = f"{strategy_str_for_name}_{time.strftime('%Y%m%d_%H%M')}"
+
+    # Run（実行）を開始。with文を使うと、ブロックを抜ける際に自動で終了処理が行われる
     # run_nameで、UIに表示される実行の名前を設定
     run_name = f"{cfg.optimization.strategy}_{time.strftime('%Y%m%d_%H')}"
     with mlflow.start_run(run_name=run_name):
-        flat_params = flatten_dict_config(cfg)# 3. Hydraの設定（ハイパーパラメータ）をMLflowに記録
+        flat_params = flatten_dict_config(cfg)# Hydraの設定（ハイパーパラメータ）をMLflowに記録
         mlflow.log_params(flat_params) # ネストした設定ファイルが見やすいようにフラット化する
         
-        # 4. タグを設定して、後で検索やフィルタリングをしやすくする
+        # タグを設定して、後で検索やフィルタリングをしやすくする
         mlflow.set_tag("data_name", cfg.data.name)
         mlflow.set_tag("optimizer", "differential_evolution")
 
-        # 5. 最適化プロセスを実行
+        # 最適化プロセスを実行
         optimizer = BaccusOptimizer(cfg)
         optimizer.run()
 
