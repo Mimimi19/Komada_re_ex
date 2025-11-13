@@ -67,6 +67,9 @@ class BaccusOptimizer:
         """
         
         self.cfg = cfg
+        # I2を使用するかどうかのフラグ
+        self.use_I2 = self.cfg.hyper_params.get('use_I2', True)
+        
         self.total_lnk_model_runs = 0
         self.failed_lnk_model_runs = 0
         self.current_epoch_best_fun_value = 1000.0  # 最小化問題なので初期値は大きな値
@@ -91,6 +94,14 @@ class BaccusOptimizer:
         print(f"データセット '{self.cfg.data.name}' を使用します。")
         print(f"入力データ: {input_path}")
         print(f"出力データ: {output_path}")
+        
+        if not self.use_I2:
+            print("\n--- 警告 ---")
+            print("hyper_params.use_I2 が False に設定されています。")
+            print("I2 state (p_I2, ksi, ksr) は強制的に 0.0 として扱われます。")
+            print("------------\n")
+        else:
+            print("\nI2 state (p_I2, ksi, ksr) は最適化対象に含まれます。\n")
 
         self.Input = np.genfromtxt(input_path)
         self.Output = np.genfromtxt(output_path)
@@ -101,6 +112,24 @@ class BaccusOptimizer:
         self.results_dir = os.path.join(base_dir, 'scripts', 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
         os.makedirs(self.results_dir, exist_ok=True)
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
+        
+    def _normalize_states(self, p_R, p_A, p_I1, p_I2):
+        """
+        初期占有率の比率を正規化し、合計1.0のタプルを返すヘルパー関数。
+        """
+        # use_I2: false の場合、p_I2 は 0.0 が渡される想定
+        total = p_R + p_A + p_I1 + p_I2
+        
+        if total > 1e-9: # ゼロ除算を回避
+            R_start = p_R / total
+            A_start = p_A / total
+            I1_start = p_I1 / total
+            I2_start = p_I2 / total
+            return R_start, A_start, I1_start, I2_start
+        else:
+            # オプティマイザが全て0を提案した場合のフォールバック
+            # (この試行はペナルティ(相関1.0)を受ける)
+            return 1.0, 0.0, 0.0, 0.0
 
     def lnk_model(self, x, save_states=False):
         """
@@ -109,10 +138,10 @@ class BaccusOptimizer:
         self.total_lnk_model_runs += 1
         try:
             hp = self.cfg.hyper_params
-            dt, R_start, A_start, I1_start, I2_start, tau = \
-                hp.dt, hp.R_start, hp.A_start, hp.I1_start, hp.I2_start, hp.tau
-
+            dt, tau = hp.dt, hp.tau
+            
             J = self.J
+            
             alphas = x[0:J]
             delta = x[J]
             a_nonlinear = x[J+1]
@@ -124,7 +153,22 @@ class BaccusOptimizer:
             kfr_kinetic = x[J+7]
             ksi_kinetic = x[J+8]
             ksr_kinetic = x[J+9]
+            # 各占有率の初期値
+            p_R = x[J+10]
+            p_A = x[J+11]
+            p_I1 = x[J+12]
+            p_I2 = x[J+13]
+            
+            if not self.use_I2:
+                ksi_kinetic = 0.0
+                ksr_kinetic = 0.0
+                p_I2 = 0.0
 
+            R_start, A_start, I1_start, I2_start = self._normalize_states(
+                p_R, p_A, p_I1, p_I2
+            )
+            
+            
             t = min(len(self.Input), len(self.Output))
 
             # Linear Filter
@@ -187,7 +231,13 @@ class BaccusOptimizer:
         intermediate_params = {
             **{f'L{i+1}': xk[i] for i in range(self.J)},
             'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
-            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9]
+            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 
+            'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
+            # 占有率
+            'p_R': xk[self.J+10],
+            'p_A': xk[self.J+11],
+            'p_I1': xk[self.J+12],
+            'p_I2': xk[self.J+13]
         }
         
         # mlflow.log_metrics を使って辞書の中身を一度に記録
@@ -219,8 +269,28 @@ class BaccusOptimizer:
             'kfr': optimal_params[self.J+7],
             'ksi': optimal_params[self.J+8],
             'ksr': optimal_params[self.J+9],
+            # ---
+            'p_R': optimal_params[self.J+10],
+            'p_A': optimal_params[self.J+11],
+            'p_I1': optimal_params[self.J+12],
+            'p_I2': optimal_params[self.J+13],
+            # ---
             'correlation': optimal_correlation
         }
+        
+        p_R_opt = param_map['p_R']
+        p_A_opt = param_map['p_A']
+        p_I1_opt = param_map['p_I1']
+        p_I2_opt = param_map['p_I2'] if self.use_I2 else 0.0 # use_I2を考慮
+        
+        R_start_opt, A_start_opt, I1_start_opt, I2_start_opt = self._normalize_states(
+            p_R_opt, p_A_opt, p_I1_opt, p_I2_opt
+        )
+        
+        param_map['R_start_normalized'] = R_start_opt
+        param_map['A_start_normalized'] = A_start_opt
+        param_map['I1_start_normalized'] = I1_start_opt
+        param_map['I2_start_normalized'] = I2_start_opt
 
         # 最終的なパラメータをファイルに保存
         for name, val in param_map.items():
@@ -248,8 +318,8 @@ class BaccusOptimizer:
         # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
         print("Numba JITコンパイラのウォームアップ中...")
         try:
-            # ダミーのパラメータ配列 (長さ: J + 10) を作成
-            x_dummy = np.ones(self.J + 10) 
+            # ダミーのパラメータ配列 (長さ: J + 14) を作成
+            x_dummy = np.ones(self.J + 14) 
             # 目的関数を一度だけ実行して、コンパイルを強制する
             self.lnk_model(x_dummy, save_states=False)
             print("ウォームアップ完了。最適化を開始します。")
@@ -266,25 +336,48 @@ class BaccusOptimizer:
         try_bounds = [alpha_bounds_tuple] * J
         
         #    Configのリスト [min, max] を tuple(min, max) に変換
-        try_bounds.extend([
-            # LinearFilter
-            tuple(pb.LinearFilter.delta),
-            # Nonlinear
-            tuple(pb.Nonlinear.a),
-            tuple(pb.Nonlinear.kappa),
-            tuple(pb.Nonlinear.b1),
-            tuple(pb.Nonlinear.b2),
-            # Kinetics
-            tuple(pb.Kinetics.ka),
-            tuple(pb.Kinetics.kfi),
-            tuple(pb.Kinetics.kfr),
-            tuple(pb.Kinetics.ksi),
-            tuple(pb.Kinetics.ksr)
-        ])
+        try:
+            try_bounds.extend([
+                # LinearFilter
+                tuple(pb.LinearFilter.delta),
+                # Nonlinear
+                tuple(pb.Nonlinear.a),
+                tuple(pb.Nonlinear.kappa),
+                tuple(pb.Nonlinear.b1),
+                tuple(pb.Nonlinear.b2),
+                # Kinetics
+                tuple(pb.Kinetics.ka),
+                tuple(pb.Kinetics.kfi),
+                tuple(pb.Kinetics.kfr),
+                tuple(pb.Kinetics.ksi),
+                tuple(pb.Kinetics.ksr),
+            # InitialStates 
+                tuple(pb.InitialStates.p_R),
+                tuple(pb.InitialStates.p_A),
+                tuple(pb.InitialStates.p_I1),
+                tuple(pb.InitialStates.p_I2)
+            ])
+        except Exception as e:
+            print(f"エラー: config.yaml の 'param_bounds' 設定が不足しています。")
+            print("param_bounds に 'InitialStates' (p_R, p_A, p_I1, p_I2) が正しく定義されているか確認してください。")
+            print(f"詳細: {e}")
+            raise
+
         
+        #use_I2=False の場合、探索範囲を [0, 0] に固定
+        if not self.use_I2:
+            print("I2が無効なため、ksi, ksr, p_I2 の探索範囲を [0.0, 0.0] に固定します。")
+            ksi_index = J + 8
+            ksr_index = J + 9
+            p_I2_index = J + 13 # p_I2 のインデックス
+            
+            try_bounds[ksi_index] = (0.0, 0.0)
+            try_bounds[ksr_index] = (0.0, 0.0)
+            try_bounds[p_I2_index] = (0.0, 0.0) # I2の比率も0に固定
         # パラメータ探索範囲(try_bounds)をMLflowに記録する
         param_names = [f'L{i+1}' for i in range(self.J)] + [
-            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
+            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
+            'p_R', 'p_A', 'p_I1', 'p_I2'
         ]
 
         #MLflowに記録するための辞書を作成
@@ -307,10 +400,7 @@ class BaccusOptimizer:
             mutation = strategy_cfg.mutation
             n_vectors = strategy_cfg.n_vectors
             crossover = strategy_cfg.crossover
-            
             # scipy.optimize.differential_evolution が要求する strategy 文字列を組み立てる
-            # 例: 'rand', 1, 'bin' -> 'rand1bin'
-            # 例: 'best', 2, 'exp' -> 'best2exp'
             de_strategy_str = f"{mutation}{n_vectors}{crossover}"
             
             # 組み立てた戦略をログに出力
@@ -441,6 +531,8 @@ def main(cfg: DictConfig):
 
     # Run（実行）を開始。with文を使うと、ブロックを抜ける際に自動で終了処理が行われる
     # run_nameで、UIに表示される実行の名前を設定
+    
+    use_I2_str = "I2-True" if cfg.hyper_params.get('use_I2', True) else "I2-False"
     run_name = f"{cfg.optimization.strategy}_{time.strftime('%Y%m%d_%H')}"
     with mlflow.start_run(run_name=run_name):
         flat_params = flatten_dict_config(cfg)# Hydraの設定（ハイパーパラメータ）をMLflowに記録
@@ -449,7 +541,7 @@ def main(cfg: DictConfig):
         # タグを設定して、後で検索やフィルタリングをしやすくする
         mlflow.set_tag("data_name", cfg.data.name)
         mlflow.set_tag("optimizer", "differential_evolution")
-
+        mlflow.set_tag("use_I2", str(cfg.hyper_params.get('use_I2', True)))
         # 最適化プロセスを実行
         optimizer = BaccusOptimizer(cfg)
         optimizer.run()
