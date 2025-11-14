@@ -5,7 +5,7 @@ import time
 import pprint
 import numpy as np
 from scipy.stats import spearmanr
-from scipy.optimize import differential_evolution
+from scipy.optimize import differential_evolution, minimize
 from scipy.signal import fftconvolve
 from tqdm import tqdm
 import hydra
@@ -103,9 +103,50 @@ class BaccusOptimizer:
         else:
             print("\nI2 state (p_I2, ksi, ksr) は最適化対象に含まれます。\n")
 
-        self.Input = np.genfromtxt(input_path)
-        self.Output = np.genfromtxt(output_path)
+        Input_full = np.genfromtxt(input_path)
+        Output_full = np.genfromtxt(output_path)
         self.J = self.cfg.hyper_params.J
+        
+        # データの最初と最後の2秒をトリミング
+        try:
+            dt = self.cfg.hyper_params.dt
+            trim_i_seconds = self.cfg.hyper_params.trim_I_seconds # 入力データのトリミング秒数
+            trim_o_seconds = self.cfg.hyper_params.trim_O_seconds # 出力データのトリミング秒数
+            # 2秒間に相当するインデックス数を計算
+            trim_i_indices = int(trim_i_seconds / dt)
+            trim_o_indices = int(trim_o_seconds / dt)
+            
+            min_len = min(len(Input_full), len(Output_full))
+            
+            # 配列がトリミング分（合計4秒）より短い場合の安全チェック
+            if min_len <= (2 * trim_i_indices):
+                print(f"警告: データ長 ({min_len}) が短すぎて、前後{trim_i_seconds+trim_o_seconds}秒（{trim_i_indices+trim_o_indices}インデックス）をトリミングできません。")
+                print("トリミングせずに処理を続行します。")
+                self.Input = Input_full
+                self.Output = Output_full
+            else:
+                # 2秒後から開始
+                start_index = trim_i_indices
+                # 最後の2秒前まで
+                end_index = -trim_o_indices 
+                
+                self.Input = Input_full[start_index:end_index]
+                self.Output = Output_full[start_index:end_index]
+                
+                print(f"\n--- データトリミング (前{trim_i_seconds}秒, 後{trim_o_seconds}秒) ---")
+                print(f"dt={dt}s のため、{trim_i_indices+trim_o_indices} インデックスをトリミングします。")
+                # スライス後の長さを計算（-trim_indices がインデックス何番目かを示す）
+                end_idx_pos_in = len(Input_full) - trim_i_indices - 1
+                end_idx_pos_out = len(Output_full) - trim_o_indices - 1
+                print(f"Input: {len(Input_full)} -> {len(self.Input)} (インデックス {start_index} から {end_idx_pos_in} を使用)")
+                print(f"Output: {len(Output_full)} -> {len(self.Output)} (インデックス {start_index} から {end_idx_pos_out} を使用)")
+                print(f"----------------------------------\n")
+                
+        except Exception as e:
+            print(f"エラー: データトリミング中に失敗しました。{e}")
+            print("トリミングせずに処理を続行します。")
+            self.Input = Input_full
+            self.Output = Output_full
         
         base_dir = get_original_cwd()
         # self.results_dir のパスを修正し、重複した行を削除
@@ -414,7 +455,7 @@ class BaccusOptimizer:
             print(f"詳細: {e}")
             raise # エラーが発生したら最適化を実行せずに終了
         
-        result = differential_evolution(
+        de_result = differential_evolution(
             self.lnk_model,      # 目的関数（最小化したい関数）
             try_bounds,          # 探索するパラメータの範囲（各変数の上下限）
             disp=True,           # 途中経過を表示する
@@ -426,11 +467,29 @@ class BaccusOptimizer:
             callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
         )
 
-        print("\n最適化が完了しました。")
+        print("\n大域探索 (DE) が完了しました。")
+        print(f"DE 最良スコア: {-de_result.fun:.6f}")
+        print("最適な結果を初期値として局所探索 (Powell) を開始します... (Phase 2: Refinement)")
+
+        #局所探索 (Powell法で解を「磨き上げ」)
+        # config.yaml に local_maxiter を追加するか、ここではDEのイテレーション数を流用
+        local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2) 
+
+        result = minimize(
+            self.lnk_model,          # 目的関数
+            de_result.x,             # DEで見つけた最適解を初期値 (x0) に設定
+            method='Powell',         # 微分不要で高速な局所探索手法
+            bounds=try_bounds,       # 境界制約はそのまま維持
+            options={
+                'disp': True,        # 局所探索の経過も表示
+                'maxiter': local_maxiter # 局所探索用のイテレーション数
+            }
+        )
+
+        print("\nハイブリッド最適化が完了しました。")
         pprint.pprint(result)
         
         print("\n--- 検証統計 ---")
-        
         # 成功した実行回数を計算
         successful_runs = self.total_lnk_model_runs - self.failed_lnk_model_runs
         
@@ -540,7 +599,7 @@ def main(cfg: DictConfig):
         
         # タグを設定して、後で検索やフィルタリングをしやすくする
         mlflow.set_tag("data_name", cfg.data.name)
-        mlflow.set_tag("optimizer", "differential_evolution")
+        mlflow.set_tag("optimizer", "hybrid_DE_Powell")
         mlflow.set_tag("use_I2", str(cfg.hyper_params.get('use_I2', True)))
         # 最適化プロセスを実行
         optimizer = BaccusOptimizer(cfg)

@@ -11,10 +11,14 @@ hyper_params:
 
   # 刻み幅
   dt: 0.0002 # 1/5000 s
+  #使用データのトリミング秒数
+  trim_I_seconds: 2.0 # s
+  trim_O_seconds: 1.0 # s
 
   # Linear Filterのパラメータ
   J: 15
   tau: 30
+
 
   # true: I2, ksi, ksr を最適化対象に含める
   # false: I2, ksi, ksr を強制的に 0.0 にする
@@ -26,7 +30,7 @@ hyper_params:
       alphas: [-5.0, 5.0]  ## alphas (L1-L15): 論文に制約なし。
       delta: [0.0, 0.2] #  delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義、前任者のコードを参考に上限を 0.2 に設定。
     Nonlinear:
-      a: [-10.0, 10.0]   # a: 論文で (0.0, 20.0) と定義
+      a: [1e-6, 20.0]   # a: 論文で (0.0, 20.0) と定義
       kappa: [-10.0, 10.0]  # kappa: 論文に制約なし。
       b1: [-10.0, 10.0]   # b1: 論文に制約なし。
       b2: [-10.0, 10.0] # b2: 論文に制約なし。
@@ -47,8 +51,8 @@ hyper_params:
 
 # 差分化進化法の設定
 optimization:
-  maxiter: 500 # 最大繰り返し回数
-  popsize: 50 # 個体数 (探索候補の数)
+  maxiter: 200 # 最大繰り返し回数
+  popsize: 100 # 個体数 (探索候補の数)
   updating: 'deferred' # 並列計算の更新方法
   workers: -1 # 全てのCPUコアを使用
 
