@@ -23,6 +23,9 @@ uv run src/BaccusModel.py data=Ucb1
 uv add -r requirements.txt
 uv run src/BaccusModel.py data=Ucb2
 
+#I2を使わない時
+hyper_params.use_I2=false
+
 #別のターミナルを開いてログを表示
 cd Re_experiment/
 tail -f scripts/lnk_model_debug.log | nl
