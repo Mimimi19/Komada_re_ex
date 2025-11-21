@@ -5,3 +5,4 @@ mlruns/*
 outputs/*
 .env
 ca.crt
+scripts/chenge_log.txt
