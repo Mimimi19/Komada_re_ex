@@ -3,15 +3,93 @@ import matplotlib.pyplot as plt
 
 # --- 1. 設定 ---
 # ファイル名
-stim_filename = 'data/ret2p/chirp_stimulus.txt'
+stim_filename = 'data/ret2p/chirp_stim_64Hz_linear.txt'
 # 応答データファイルのフォーマット (反復回数は %d で指定)
-resp_filename_format = 'data/ret2p/response_data_repeat_%d.txt'
+resp_filename_format = 'data/ret2p/response_data_64Hz.txt'
 
 # 読み込む反復回数を指定 (MATLABでこのファイル名で保存した場合)
 # 例: MATLABで 'response_data_repeat_1.txt' として保存したなら、1 を指定
 target_repeat_to_load = 1 
 
-# プロットしたいROI (細胞) のインデックスを指定
+# プロットしたいROI (細胞) のインデックスを指定import numpy as np
+import matplotlib.pyplot as plt
+
+# --- 1. 設定 ---
+# ファイル名 (先ほど生成した64Hzのファイルを指定)
+stim_filename = 'data/ret2p/chirp_stim_64Hz_linear.txt'
+resp_filename = 'data/ret2p/response_data_64Hz.txt'
+
+# サンプリングレート (Hz)
+# ※重要: 入力データも64Hzにダウンサンプリング済みなので、両方64Hzにします
+stim_sampling_rate = 64
+resp_sampling_rate = 64
+
+# --- 2. chirp_stim_64Hz.txt の読み込みとプロット ---
+try:
+    chirp_stim = np.loadtxt(stim_filename)
+    stim_time = np.arange(0, len(chirp_stim)) / stim_sampling_rate
+
+    plt.figure(figsize=(12, 8))
+
+    plt.subplot(2, 1, 1)
+    plt.plot(stim_time, chirp_stim, color='blue', label='Chirp Stimulus (64Hz)')
+    plt.title(f'Chirp Stimulus Waveform ({len(chirp_stim)} samples)')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Stimulus Intensity')
+    plt.grid(True)
+    plt.legend()
+
+except FileNotFoundError:
+    print(f"エラー: {stim_filename} が見つかりません。")
+    plt.figure()
+    plt.subplot(2, 1, 1)
+
+# --- 3. response_data_64Hz.txt の読み込みとプロット ---
+try:
+    # データを読み込む
+    response_data = np.loadtxt(resp_filename)
+    
+    # データが1次元配列（1列しかない）場合の処理
+    if response_data.ndim == 1:
+        selected_roi_response = response_data
+        roi_label = "ROI 0 (extracted)"
+    else:
+        # もし複数列ある場合は最初の列を使う
+        selected_roi_response = response_data[:, 0]
+        roi_label = "ROI 0"
+
+    resp_time = np.arange(0, len(selected_roi_response)) / resp_sampling_rate
+
+    plt.subplot(2, 1, 2)
+    plt.plot(resp_time, selected_roi_response, color='red', label=f'Response ({roi_label})')
+    plt.title(f'Cellular Response to Chirp Stimulus ({roi_label})')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Normalized Fluorescence (a.u.)')
+    plt.grid(True)
+    plt.legend()
+
+except FileNotFoundError:
+    print(f"エラー: {resp_filename} が見つかりません。")
+    plt.subplot(2, 1, 2)
+
+plt.tight_layout()
+plt.show()
+
+# --- 参考: 重ね合わせプロット ---
+# 両方とも64Hzになっているはずなので、そのまま重ねてプロット可能です
+if 'stim_time' in locals() and 'selected_roi_response' in locals():
+    # データ長がわずかに異なる場合のために長さを揃える（短い方に合わせる）
+    min_len = min(len(stim_time), len(resp_time))
+    
+    plt.figure(figsize=(12, 6))
+    plt.plot(stim_time[:min_len], chirp_stim[:min_len], color='blue', alpha=0.7, label='Stimulus')
+    plt.plot(resp_time[:min_len], selected_roi_response[:min_len], color='red', alpha=0.7, label='Response')
+    plt.title('Stimulus and Response Overlaid (64Hz)')
+    plt.xlabel('Time (s)')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 # Pythonは0-based indexなので、最初の細胞なら 0、10番目の細胞なら 9
 target_roi_index = 0 
 
@@ -21,7 +99,8 @@ resp_sampling_rate = 64    # lchirp_avg (応答データ) は64Hz
 
 # --- 2. chirp_stimulus.txt の読み込みとプロット ---
 try:
-    chirp_stim = np.loadtxt(stim_filename, delimiter='\t')
+    # chirp_stim = np.loadtxt(stim_filename, delimiter='\t')
+    chirp_stim= np.loadtxt(stim_filename)
     stim_time = np.arange(0, len(chirp_stim)) / stim_sampling_rate
 
     plt.figure(figsize=(12, 8))
