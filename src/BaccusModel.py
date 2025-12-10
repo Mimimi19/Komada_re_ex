@@ -107,37 +107,41 @@ class BaccusOptimizer:
         Output_full = np.genfromtxt(output_path)
         self.J = self.cfg.hyper_params.J
         
-        # データの最初と最後の2秒をトリミング
+        # データの最初と最後をトリミング
         try:
             dt = self.cfg.hyper_params.dt
             trim_i_seconds = self.cfg.hyper_params.trim_I_seconds # 入力データのトリミング秒数
             trim_o_seconds = self.cfg.hyper_params.trim_O_seconds # 出力データのトリミング秒数
-            # 2秒間に相当するインデックス数を計算
+            # トリミングするインデックス数を計算
             trim_i_indices = int(trim_i_seconds / dt)
             trim_o_indices = int(trim_o_seconds / dt)
             
             min_len = min(len(Input_full), len(Output_full))
             
-            # 配列がトリミング分（合計4秒）より短い場合の安全チェック
-            if min_len <= (2 * trim_i_indices):
+            # 配列がトリミング分（合計）より短い場合の安全チェック
+            if min_len <= (trim_i_indices + trim_o_indices):
                 print(f"警告: データ長 ({min_len}) が短すぎて、前後{trim_i_seconds+trim_o_seconds}秒（{trim_i_indices+trim_o_indices}インデックス）をトリミングできません。")
                 print("トリミングせずに処理を続行します。")
                 self.Input = Input_full
                 self.Output = Output_full
             else:
-                # 2秒後から開始
                 start_index = trim_i_indices
-                # 最後の2秒前まで
-                end_index = -trim_o_indices 
+                
+                if trim_o_indices > 0:
+                    end_index = -trim_o_indices 
+                else:
+                    end_index = len(Input_full) # スライスで[start:None]と同じ意味
                 
                 self.Input = Input_full[start_index:end_index]
                 self.Output = Output_full[start_index:end_index]
                 
                 print(f"\n--- データトリミング (前{trim_i_seconds}秒, 後{trim_o_seconds}秒) ---")
-                print(f"dt={dt}s のため、{trim_i_indices+trim_o_indices} インデックスをトリミングします。")
-                # スライス後の長さを計算（-trim_indices がインデックス何番目かを示す）
-                end_idx_pos_in = len(Input_full) - trim_i_indices - 1
+                print(f"dt={dt}s のため、前{trim_i_indices}インデックス、後{trim_o_indices}インデックスをトリミングします。")
+                
+                # 表示用の終端インデックスを計算
+                end_idx_pos_in = len(Input_full) - trim_o_indices - 1
                 end_idx_pos_out = len(Output_full) - trim_o_indices - 1
+                
                 print(f"Input: {len(Input_full)} -> {len(self.Input)} (インデックス {start_index} から {end_idx_pos_in} を使用)")
                 print(f"Output: {len(Output_full)} -> {len(self.Output)} (インデックス {start_index} から {end_idx_pos_out} を使用)")
                 print(f"----------------------------------\n")
