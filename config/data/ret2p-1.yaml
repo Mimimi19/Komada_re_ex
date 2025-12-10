@@ -1,7 +1,7 @@
 # config/data/ret2p-1.yaml
 
 name: "ret2p"
-input_file: "data/ret2p/chirp_stim_64Hz.txt"
+input_file: "data/ret2p/chirp_stim_64Hz_bilinear.txt"
 output_file: "data/ret2p/response_data_64Hz.txt"
 
 # サンプリング間隔 (1秒 / 64Hz = 0.015625)

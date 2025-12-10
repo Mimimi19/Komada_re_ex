@@ -109,7 +109,7 @@ class BaccusOptimizer:
         
         # データの最初と最後をトリミング
         try:
-            dt = self.cfg.hyper_params.dt
+            dt = self.cfg.data.dt  # サンプリング間隔 (秒)
             trim_i_seconds = self.cfg.hyper_params.trim_I_seconds # 入力データのトリミング秒数
             trim_o_seconds = self.cfg.hyper_params.trim_O_seconds # 出力データのトリミング秒数
             # トリミングするインデックス数を計算
@@ -183,7 +183,8 @@ class BaccusOptimizer:
         self.total_lnk_model_runs += 1
         try:
             hp = self.cfg.hyper_params
-            dt, tau = hp.dt, hp.tau
+            dt = self.cfg.data.dt
+            tau = hp.tau
             
             J = self.J
             
