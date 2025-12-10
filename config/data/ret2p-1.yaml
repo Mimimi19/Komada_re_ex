@@ -1,0 +1,5 @@
+# config/data/ret2p-1.yaml
+name: "ret2p"
+input_file: "data/ret2p/chirp_stimulus.txt"
+output_file: "data/ret2p/response_data_repeat_64Hz.txt"
+dt: 0.015625 # chirp_stimulus.txtが1000Hzの場合。64Hzなら約0.015625に合わせてください。

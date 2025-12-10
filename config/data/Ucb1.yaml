@@ -1,3 +1,5 @@
 name: "cb1"
 input_file: "data/cb1/U60wn_0.0002s.txt"
 output_file: "data/cb1/U60average80-86.txt"
+#  刻み幅
+dt: 0.0002 # 1/5000 s

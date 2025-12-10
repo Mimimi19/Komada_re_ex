@@ -10,7 +10,9 @@ defaults:
 hyper_params:
 
   # 刻み幅
-  dt: 0.0002 # 1/5000 s
+  # データごとの dt を使用するため、/data/ 以下の YAML ファイルで指定
+  # dt: 0.0002 # 1/5000 s
+
   #使用データのトリミング秒数
   trim_I_seconds: 2.0 # s
   trim_O_seconds: 1.0 # s
