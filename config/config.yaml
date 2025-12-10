@@ -18,7 +18,9 @@ hyper_params:
   trim_O_seconds: 0.0 # s
 
   # Linear Filterのパラメータ
-  J: 15
+  # J: 15
+  # カルシウム応答は約0.5〜1.0秒の履歴が必要なため、40〜60程度まで増やす、baccusはアレイを使ってたから早い
+  J: 50  # (50 * 0.015625s ≈ 0.78秒)
   tau: 1.0 # s 前任者より
 
 
@@ -30,7 +32,7 @@ hyper_params:
   param_bounds:
     LinearFilter:
       alphas: [-10.0, 10.0]  ## alphas (L1-L15): 論文に制約なし。
-      delta: [0.0, 0.2] #  delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義、前任者のコードを参考に上限を 0.2 に設定。
+      delta: [0.0, 1.0] #  delta: 論文で (0.0, 0.002) 秒 (0-2ms) と定義これはアレイ、カルシウム応答の遅れを許容するため上限を上げる
     Nonlinear:
       a: [1e-6, 20.0]   # a: 論文で (0.0, 20.0) と定義
       kappa: [1e-6, 40.0]  # kappa: 論文に制約なし。erf関数との関係上普通負にはならないので下限を正の小さい値に設定。
@@ -65,4 +67,4 @@ optimization:
     # 差分ベクトルの数 (通常 1 または 2)
     n_vectors: 1
     # 'bin' (binomial) または 'exp' (exponential)
-    crossover: 'bin'
+    crossover: 'exp'

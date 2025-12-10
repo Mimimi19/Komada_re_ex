@@ -103,8 +103,26 @@ class BaccusOptimizer:
         else:
             print("\nI2 state (p_I2, ksi, ksr) は最適化対象に含まれます。\n")
 
-        Input_full = np.genfromtxt(input_path)
-        Output_full = np.genfromtxt(output_path)
+        # 1. 入力データの正規化 (Z-score Standardization)
+        # 光刺激は「平均からの変化量(コントラスト)」として扱うのがモデルにとって最適です。
+        raw_input = np.genfromtxt(input_path)
+        input_std = np.std(raw_input)
+        if input_std > 1e-9: # ゼロ除算防止
+            # 平均を0、標準偏差を1にする（これでどんな単位のデータが来てもモデルへの入力は -2.0 ~ +2.0 程度に収まります）
+            Input_full = (raw_input - np.mean(raw_input)) / input_std
+        else:
+            # 変化がないデータの場合（エラー回避）
+            Input_full = raw_input - np.mean(raw_input)
+
+        # 2. 出力データの正規化 (Max-Abs Scaling)
+        # カルシウム応答などの生体信号は単位が実験ごとに違うため、最大値が 1.0 になるように揃えます。
+        raw_output = np.genfromtxt(output_path)
+        max_val = np.max(np.abs(raw_output))
+        if max_val > 1e-9: # ゼロ除算防止
+            Output_full = raw_output / max_val
+        else:
+            Output_full = raw_output
+                
         self.J = self.cfg.hyper_params.J
         
         # データの最初と最後をトリミング
