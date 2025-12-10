@@ -14,8 +14,8 @@ hyper_params:
   # dt: 0.0002 # 1/5000 s
 
   #使用データのトリミング秒数
-  trim_I_seconds: 2.0 # s
-  trim_O_seconds: 1.0 # s
+  trim_I_seconds: 0.0 # s
+  trim_O_seconds: 0.0 # s
 
   # Linear Filterのパラメータ
   J: 15
