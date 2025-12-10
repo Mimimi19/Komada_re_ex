@@ -23,6 +23,10 @@ uv run src/BaccusModel.py data=Ucb1
 uv add -r requirements.txt
 uv run src/BaccusModel.py data=Ucb2
 
+#ret2pのとき
+uv add -r requirements.txt
+uv run src/BaccusModel.py data=ret2p-1
+
 #I2を使わない時
 hyper_params.use_I2=false
 
