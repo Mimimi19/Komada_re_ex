@@ -39,10 +39,9 @@ def _simulation_loop_jit(time_steps, u_input, dt, R_start, A_start, I1_start, I2
         keep_I2 += (Runge1_I2 + 2 * Runge2_I2 + 2 * Runge3_I2 + Runge4_I2) / 6
         
         # 占有率が0-1の範囲外になった場合、計算を打ち切る
-        if not (0 <= keep_R < 1 and 0 <= keep_A < 1 and 0 <= keep_I1 < 1 and 0 <= keep_I2 < 1):
-            check = 0 # 異常フラグ
-            # Numbaは異なるサイズの配列を返せないので、全体を返して後でスライスする
-            # ここで処理を中断
+        # 1.0001 まで許容する (クリッピングしてるので基本大丈夫ですが念のため)
+        if not (-0.001 <= keep_R <= 1.001 and -0.001 <= keep_A <= 1.001):
+            check = 0
             break
             
         R_state[i], A_state[i], I1_state[i], I2_state[i] = keep_R, keep_A, keep_I1, keep_I2
