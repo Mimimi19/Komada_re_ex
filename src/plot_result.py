@@ -89,10 +89,20 @@ def run_prediction(params, Input, dt, tau=1.0):
     R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
     t_len = len(Input)
 
-    # 1. Linear Filter
+    # 1. Linear Filter カーネル生成
     linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], t_len, dt, tau)
-    # 線形フィルタ出力 g(t)
-    g_t = fftconvolve(Input, linear_filter_kernel, mode='same')
+    
+    g_full = fftconvolve(Input, linear_filter_kernel, mode='full')
+    
+    filter_len = int(tau / dt)  # 実際のフィルタの時間幅に対応するインデックス数
+    shift_idx = len(linear_filter_kernel) - filter_len # 切り捨てるべき先頭の長さ
+    
+    # 安全策
+    if shift_idx < 0: shift_idx = 0
+    if shift_idx >= len(g_full): shift_idx = 0
+    
+    # シフトして切り出し (入力と同じ長さに合わせる)
+    g_t = g_full[shift_idx : shift_idx + t_len]
     
     # 2. Nonlinear Module
     # 非線形変換後の出力 u(t)
@@ -119,9 +129,9 @@ def run_prediction(params, Input, dt, tau=1.0):
 
 def main():
     # ================= 設定エリア =================
+    # 必要に応じてパスを変更してください
     DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
-     # 例: "scripts/results/Baccus_ret2p/20251211_14"
-    # RESULTS_DIR = "scripts/results/Baccus_ret2p/20251211_07" 
+    # デフォルトのResultディレクトリ（引数がない場合）
     RESULTS_DIR = "scripts/20251211_07" 
     TAU = 1.0 
     # ============================================
@@ -157,42 +167,43 @@ def main():
         print("Final Response (A) をゼロ埋めして表示します。")
         Prediction = np.zeros_like(Output_exp)
     else:
-        # 長さ調整
+        # 長さ調整（計算過程でサイズが変わっている可能性があるため念の為）
         min_len_eval = min(len(Output_exp), len(Prediction))
         Output_exp = Output_exp[:min_len_eval]
         Prediction = Prediction[:min_len_eval]
         g_t = g_t[:min_len_eval]
         u_t = u_t[:min_len_eval]
+        Input_plot = Input[:min_len_eval] # プロット用に入力も合わせる
         
         corr, _ = spearmanr(Output_exp, Prediction)
         print(f"Spearman Correlation: {corr:.6f}")
 
     # ================= プロット作成 (4段構成) =================
-   # ================= プロット作成 (4段構成) =================
     save_dir = os.path.join(RESULTS_DIR, "validation")
     os.makedirs(save_dir, exist_ok=True)
     
     # 時間軸の作成
-    total_time = len(Input) * dt
-    time_axis = np.arange(len(Input)) * dt
+    # Input_plotを使うことで長さの不整合を防ぐ
+    total_time = len(Input_plot) * dt
+    time_axis = np.arange(len(Input_plot)) * dt
 
-    # 1秒刻みの目盛りを作成 (0, 1, 2, ..., total_time)
+    # 1秒刻みの目盛りを作成
     major_ticks = np.arange(0, int(total_time) + 1, 1)
 
-    fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=False) # sharex=Falseにして個別に制御
+    fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=False) 
     
     # 共通のスタイル設定関数
     def setup_axis(ax, title, ylabel):
         ax.set_title(title, fontsize=12)
         ax.set_ylabel(ylabel, fontsize=10)
         ax.set_xlim(0, total_time)
-        ax.set_xticks(major_ticks) # 1秒単位の目盛りを設定
-        ax.grid(which='major', alpha=0.5, linestyle='-') # グリッド線
-        ax.tick_params(axis='x', labelbottom=True) # すべてのグラフでX軸ラベルを表示
-        ax.set_xlabel('Time (s)', fontsize=10) # すべてにラベルをつける
+        ax.set_xticks(major_ticks) 
+        ax.grid(which='major', alpha=0.5, linestyle='-') 
+        ax.tick_params(axis='x', labelbottom=True) 
+        ax.set_xlabel('Time (s)', fontsize=10) 
 
     # 1. Input Stimulus
-    axes[0].plot(time_axis, Input, color='gray', linewidth=1)
+    axes[0].plot(time_axis, Input_plot, color='gray', linewidth=1)
     setup_axis(axes[0], '1. Input Stimulus (Normalized)', 'Contrast')
 
     # 2. Linear Filter Output (g_t)
@@ -214,7 +225,7 @@ def main():
     plt.savefig(plot_path)
     print(f"詳細グラフを保存しました: {plot_path}")
     
-    # plt.show() # サーバー環境ならコメントアウト推奨
+    # plt.show() 
 
 if __name__ == "__main__":
     main()
