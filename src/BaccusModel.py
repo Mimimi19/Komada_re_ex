@@ -349,60 +349,84 @@ class BaccusOptimizer:
         """
         print(f"\n最適化結果を {self.results_dir} に保存中...")
 
-        param_map = {
-            **{f'L{i+1}': optimal_params[i] for i in range(self.J)},
-            'delta': optimal_params[self.J],
-            'a': optimal_params[self.J+1],
-            'kappa': optimal_params[self.J+2],
-            'b1': optimal_params[self.J+3],
-            'b2': optimal_params[self.J+4],
-            'ka': optimal_params[self.J+5],
-            'kfi': optimal_params[self.J+6],
-            'kfr': optimal_params[self.J+7],
-            'ksi': optimal_params[self.J+8],
-            'ksr': optimal_params[self.J+9],
-            # ---
-            'p_R': optimal_params[self.J+10],
-            'p_A': optimal_params[self.J+11],
-            'p_I1': optimal_params[self.J+12],
-            'p_I2': optimal_params[self.J+13],
-            # ---
-            'correlation': optimal_correlation
-        }
-        
-        p_R_opt = param_map['p_R']
-        p_A_opt = param_map['p_A']
-        p_I1_opt = param_map['p_I1']
-        p_I2_opt = param_map['p_I2'] if self.use_I2 else 0.0 # use_I2を考慮
-        
-        R_start_opt, A_start_opt, I1_start_opt, I2_start_opt = self._normalize_states(
-            p_R_opt, p_A_opt, p_I1_opt, p_I2_opt
-        )
-        
-        param_map['R_start_normalized'] = R_start_opt
-        param_map['A_start_normalized'] = A_start_opt
-        param_map['I1_start_normalized'] = I1_start_opt
-        param_map['I2_start_normalized'] = I2_start_opt
+        try:
+            param_map = {}
+            
+            # --- 配列から辞書へのマッピング (インデックス管理を安全に) ---
+            # lnk_model内の展開順序と厳密に一致させます
+            idx = 0
+            
+            # Linear Filter (L1...LJ)
+            for i in range(self.J):
+                param_map[f'L{i+1}'] = optimal_params[idx]
+                idx += 1
+            
+            # Scalar Parameters
+            # 配列のインデックスを順番に進めていくため、記述ミスによるズレを防げます
+            param_keys = [
+                'delta', 'a', 'kappa', 'b1', 'b2', 
+                'ka', 'kfi', 'kfr', 'ksi', 'ksr',
+                'p_R', 'p_A', 'p_I1', 'p_I2'
+            ]
+            
+            for key in param_keys:
+                param_map[key] = optimal_params[idx]
+                idx += 1
+                
+            # 相関係数もマップに追加
+            param_map['correlation'] = optimal_correlation
 
-        # 最終的なパラメータをファイルに保存
-        for name, val in param_map.items():
-            save_results(val, os.path.join(self.results_dir, f'{name}.txt'))
-        save_results(optimal_correlation, os.path.join(self.results_dir, 'correlation.txt'))
+            # --- 正規化された初期状態の計算 ---
+            # use_I2フラグを考慮して正規化計算を行う
+            p_R_opt = param_map['p_R']
+            p_A_opt = param_map['p_A']
+            p_I1_opt = param_map['p_I1']
+            p_I2_opt = param_map['p_I2'] if self.use_I2 else 0.0
 
-        # 最終的な値をMLflowのMetricsとして記録
-        final_metrics = {f"optimal_{k}": v for k, v in param_map.items()}
-        final_metrics["optimal_correlation"] = optimal_correlation
-        mlflow.log_metrics(final_metrics)
+            R_start_opt, A_start_opt, I1_start_opt, I2_start_opt = self._normalize_states(
+                p_R_opt, p_A_opt, p_I1_opt, p_I2_opt
+            )
 
-        state_dir = os.path.join(self.results_dir, 'state')
-        os.makedirs(state_dir, exist_ok=True)
-        save_results(R_state, os.path.join(state_dir, 'R_state.txt'))
-        save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
-        save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
-        save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
-        
-        print("保存が完了しました。")
+            param_map['R_start_normalized'] = R_start_opt
+            param_map['A_start_normalized'] = A_start_opt
+            param_map['I1_start_normalized'] = I1_start_opt
+            param_map['I2_start_normalized'] = I2_start_opt
 
+            # ---ファイル保存ループ (エラーハンドリング付き) ---
+            saved_count = 0
+            for name, val in param_map.items():
+                try:
+                    # 個別のファイル保存に失敗しても他は保存し続ける
+                    save_results(val, os.path.join(self.results_dir, f'{name}.txt'))
+                    saved_count += 1
+                except Exception as e:
+                    print(f"警告: {name}.txt の保存に失敗しました: {e}")
+
+            print(f"パラメータ保存完了: {saved_count}/{len(param_map)} ファイル")
+
+            # --- MLflowへの記録 ---
+            try:
+                final_metrics = {f"optimal_{k}": v for k, v in param_map.items()}
+                mlflow.log_metrics(final_metrics)
+            except Exception as e:
+                print(f"警告: MLflowへのメトリクス送信に失敗しました: {e}")
+
+            # --- 時系列状態変数の保存 ---
+            state_dir = os.path.join(self.results_dir, 'state')
+            os.makedirs(state_dir, exist_ok=True)
+            
+            save_results(R_state, os.path.join(state_dir, 'R_state.txt'))
+            save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
+            save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
+            save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
+            
+            print("すべての保存処理が完了しました。")
+            
+        except Exception as e:
+            print(f"重大なエラー: save_optimal_results 内で予期せぬエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+            
     def run(self):
         """
         最適化プロセスを実行します。
