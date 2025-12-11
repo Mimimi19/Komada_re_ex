@@ -197,6 +197,7 @@ class BaccusOptimizer:
     def lnk_model(self, x, save_states=False):
         """
         目的関数。与えられたパラメータxでモデルを評価します。
+        mode='full' に変更して因果性を明確にし、初期の余分な部分をカットします。
         """
         self.total_lnk_model_runs += 1
         try:
@@ -232,52 +233,79 @@ class BaccusOptimizer:
                 p_R, p_A, p_I1, p_I2
             )
             
-            
             t = min(len(self.Input), len(self.Output))
 
             # Linear Filter
             linear_filter_kernel, _ = L_LNK.main(alphas, delta, t, dt, tau)
-            g_t = fftconvolve(self.Input[:t], linear_filter_kernel, mode='same')
+            
+            # --- 修正箇所: mode='full' で畳み込み ---
+            g_full = fftconvolve(self.Input[:t], linear_filter_kernel, mode='full')
+            
+            # --- 修正箇所: シフト量の計算と切り出し ---
+            # linear_filter_kernel は長さ t ですが、実際に値が入っているのは tau の期間だけです。
+            # L_LNKの実装上、kernelは逆転([::-1])して返されており、有効な成分は配列の「末尾」に寄っています。
+            # したがって、先頭の (配列長 - 有効フィルタ長) はゼロパディングによる遅延となります。
+            
+            filter_len = int(tau / dt)  # 実際のフィルタの時間幅に対応するインデックス数
+            shift_idx = len(linear_filter_kernel) - filter_len # 切り捨てるべき先頭の長さ
+            
+            # 安全策: shift_idx が範囲外にならないようにガード
+            if shift_idx < 0: shift_idx = 0
+            if shift_idx >= len(g_full): shift_idx = 0
+            
+            # 先頭の余分な部分をカットし、データ長 t 分だけ取り出す
+            # これにより、信号の立ち上がりが t=0 付近に来るように補正されます
+            g_t = g_full[shift_idx : shift_idx + t]
+            
             # Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
+            
             # Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
+            
             with open(self.debug_log_path, "a") as f:
                 f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
                 
-            if check == 1:
-                
-                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
-            else:
-                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+            print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
-                keep_post = A_state[:t]
-                output_trimmed = self.Output[:t]
-                correlation, _ = spearmanr(output_trimmed, keep_post)
-                correlation = -1 * correlation  # 最小化のため
+                # モデル出力の長さに合わせて正解データをスライスして比較
+                current_len = len(A_state)
+                output_aligned = self.Output[:current_len]
+                
+                # 万が一長さが合わない場合の安全策
+                if len(output_aligned) != len(A_state):
+                     min_l = min(len(output_aligned), len(A_state))
+                     output_aligned = output_aligned[:min_l]
+                     keep_post = A_state[:min_l]
+                else:
+                     keep_post = A_state
+
+                corr_val, _ = spearmanr(output_aligned, keep_post)
+                correlation = -1 * corr_val  # 最小化のため
             else:
                 self.failed_lnk_model_runs += 1
+            
             self.current_epoch_best_fun_value = correlation
 
             if save_states:
                 return correlation, R_state, A_state, I1_state, I2_state
             else:
                 return correlation
+
         except Exception as e:
             print(f"エラー内容: {e}")
             import traceback
-            traceback.print_exc() # 詳細なエラー情報を表示
-            
+            traceback.print_exc()
             self.failed_lnk_model_runs += 1
-            return 1.0  # エラー時は大きなペナルティを返す
-
+            return 1.0  # ペナルティ値
+        
     def save_intermediate_results(self, xk, convergence=None):
         """
         各エポックの終わりに呼び出されるコールバック関数。
