@@ -51,42 +51,98 @@ def load_data(config_path):
     return norm_input, norm_output, dt
 
 def load_params_from_dir(results_dir):
-    """パラメータ読み込み"""
+    """
+    パラメータ読み込み関数 (自動復元機能付き)
+    個別のtxtファイルが欠けている場合、epochsフォルダの最新履歴から復元します。
+    """
     params = {}
+    
+    # 1. フィルタ長 J の推定
     l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
-    alphas = []
-    # L1, L2... の順にソート
-    l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
-    
-    for f in l_files:
-        val = np.loadtxt(f)
-        alphas.append(float(val))
-    
-    params['alphas'] = np.array(alphas)
-    params['J'] = len(alphas)
+    if not l_files:
+        J = 50 # Lファイルがない場合の仮定値
+    else:
+        J = len(l_files)
+    params['J'] = J
 
-    keys = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
-            'p_R', 'p_A', 'p_I1', 'p_I2']
+    # 2. 読み込むべきパラメータ一覧
+    keys_order = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
+                  'R_start_normalized', 'A_start_normalized', 'I1_start_normalized', 'I2_start_normalized']
     
-    for k in keys:
-        path = os.path.join(results_dir, f"{k}.txt")
-        if os.path.exists(path):
-            params[k] = float(np.loadtxt(path))
-        else:
-            params[k] = 0.0
+    # 3. 欠損ファイルのチェック ('k'で始まるファイルがないはずです)
+    missing_files = []
+    for k in keys_order:
+        if not os.path.exists(os.path.join(results_dir, f"{k}.txt")):
+            missing_files.append(k)
+
+    # 4. 欠損がある場合は、epochsフォルダから最新のパラメータをロードして復元
+    if missing_files or not l_files:
+        print(f"警告: 以下のパラメータファイルが見つかりません: {missing_files}")
+        print("epochsフォルダから最新のパラメータセットを復元します...")
+        
+        # エポックファイルを検索
+        epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
+        if not epoch_files:
+            # 万が一epochsもない場合は安全なデフォルト値を入れる
+            print("エラー: epochsフォルダにもデータがありません。デフォルト値を使用します。")
+            defaults = {'b2': 1.0, 'ka': 1.0, 'kappa': 1.0, 'a': 10.0}
+            for k in keys_order:
+                params[k] = defaults.get(k, 1.0) # ゼロ除算回避のため1.0
+            if 'alphas' not in params: params['alphas'] = np.zeros(J)
+            return params
+            
+        # ファイル名から数値を抽出して最大のもの（最新）を選ぶ
+        # ファイル名例: epoch_430_params.txt
+        latest_file = max(epoch_files, key=lambda x: int(os.path.basename(x).split('_')[1]))
+        print(f"最新のエポックファイルを使用: {latest_file}")
+        
+        # 配列として読み込み
+        x = np.loadtxt(latest_file)
+        
+        # 配列から辞書へ展開
+        # 最初のJ個は alphas
+        params['alphas'] = x[0:J]
+        
+        # それ以降を順番に格納
+        current_idx = J
+        for k in keys_order:
+            if current_idx < len(x):
+                params[k] = float(x[current_idx])
+            else:
+                params[k] = 1.0 # 配列が足りない場合の安全策
+            current_idx += 1
+            
+        print(f"パラメータの復元に成功しました。 (b2={params.get('b2'):.4f}, kappa={params.get('kappa'):.4f})")
+        
+    else:
+        # 全てのファイルが揃っている場合
+        alphas = []
+        l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
+        for f in l_files:
+            alphas.append(float(np.loadtxt(f)))
+        params['alphas'] = np.array(alphas)
+        
+        for k in keys_order:
+            params[k] = float(np.loadtxt(os.path.join(results_dir, f"{k}.txt")))
+
+    # 5. 念のためのゼロ除算防止
+    if params.get('b2', 0) == 0: params['b2'] = 1e-6
+    if params.get('kappa', 0) == 0: params['kappa'] = 1e-6
+    if params.get('ka', 0) == 0: params['ka'] = 1e-6
+            
     return params
 
-def normalize_states(p_R, p_A, p_I1, p_I2):
-    total = p_R + p_A + p_I1 + p_I2
+def normalize_states(R_start_normalized, A_start_normalized, I1_start_normalized, I2_start_normalized):
+    total = R_start_normalized + A_start_normalized + I1_start_normalized + I2_start_normalized
     if total > 1e-9:
-        return p_R/total, p_A/total, p_I1/total, p_I2/total
+        return R_start_normalized/total, A_start_normalized/total, I1_start_normalized/total, I2_start_normalized/total
     return 1.0, 0.0, 0.0, 0.0
 
 def run_prediction(params, Input, dt, tau=1.0):
     """
     モデルを実行し、中間出力(g_t, u_t)も含めて返す
     """
-    R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
+    R0, A0, I10, I20 = normalize_states(params['R_start_normalized'], params['A_start_normalized'], params['I1_start_normalized'], params['I2_start_normalized'])
     t_len = len(Input)
 
     # 1. Linear Filter カーネル生成
@@ -132,7 +188,7 @@ def main():
     # 必要に応じてパスを変更してください
     DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
     # デフォルトのResultディレクトリ（引数がない場合）
-    RESULTS_DIR = "scripts/20251211_07" 
+    RESULTS_DIR = "scripts/20251211_16" 
     TAU = 1.0 
     # ============================================
 
