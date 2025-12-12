@@ -249,7 +249,7 @@ class BaccusOptimizer:
             # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
             # ここでは簡単に「u_tの分散が小さすぎる場合」を検知
             if np.std(u_t) < 1e-6:  # 閾値は調整が必要
-                print("Penalty: Saturation detected", end='\r', flush=True)
+                print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
                 return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
             # Kinetic Model
             R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
@@ -344,6 +344,8 @@ class BaccusOptimizer:
         mlflow.log_metrics(metrics_to_log, step=self.epoch_counter)
 
         timestamp = time.strftime("%d_%H:%M:%S")
+        # 表示を初期化 (行頭に戻り、行末までクリア)
+        print(f"\r\033[K", end='')
         tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
 
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, W_state):
