@@ -113,34 +113,35 @@ def normalize_states(p_R, p_A, p_I1, p_I2):
     return 1.0, 0.0, 0.0, 0.0
 
 def run_prediction(params, Input, dt, tau=1.0):
-    """モデルを実行し、中間出力(g_t, u_t)も含めて返す"""
+    """
+    モデルを実行し、中間出力(g_t, u_t)も含めて返す
+    【重要】BaccusModel.py と同じロジックで計算する
+    """
     R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
-    t_len = len(Input)
-
-    # 1. Linear Filter
-    linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], t_len, dt, tau)
     
+    # 1. Linear Filter カーネル生成 (長さを制限)
+    filter_points = int(tau / dt) + 1
+    linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], filter_points, dt, tau)
+    
+    # mode='full' で畳み込み & シフト処理
     g_full = fftconvolve(Input, linear_filter_kernel, mode='full')
-    filter_len = int(tau / dt)
-    shift_idx = len(linear_filter_kernel) - filter_len
-    if shift_idx < 0: shift_idx = 0
     
-    g_t = g_full[shift_idx : shift_idx + t_len]
-    if len(g_t) < t_len: # パディング
-        g_t = np.pad(g_t, (0, t_len - len(g_t)), 'constant')
+    # シフト量
+    shift_idx = int(tau / dt) 
+    
+    # シフトして切り出し
+    if len(g_full) > shift_idx + len(Input):
+        g_t = g_full[shift_idx : shift_idx + len(Input)]
     else:
-        g_t = g_t[:t_len]
-
-    # --- 【重要】ここが修正ポイント ---
-    # 非線形関数に入力する前に g(t) を標準偏差1.0に正規化する
-    # これにより、学習時と同じスケールで非線形関数が動作する
+        g_t = g_full[:len(Input)]
+    
+    # --- 【ここを追加】 強制正規化 ---
+    # BaccusModel.py と同様に、ここでも正規化しないとグラフ2が±100になってしまいます
     g_std = np.std(g_t)
     if g_std > 1e-9:
         g_t = g_t / g_std
-    else:
-        print("警告: g_tの分散が0です。")
     # -----------------------------
-    
+
     # 2. Nonlinear Module
     u_t = N_LNK.main(
         g_t, 
@@ -164,7 +165,7 @@ def run_prediction(params, Input, dt, tau=1.0):
 def main():
     # ================= 設定エリア =================
     DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
-    RESULTS_DIR = "scripts/20251212_22" 
+    RESULTS_DIR = "scripts/20251212_23" 
     TAU = 1.0 
     # ============================================
 

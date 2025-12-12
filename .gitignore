@@ -5,6 +5,6 @@ mlruns/*
 outputs/*
 .env
 ca.crt
-!/scripts/Latex/*
+# !/scripts/Latex
 # 生データは427.5MBあるので除外
 data/ret2p/response_data_repeat_1.txt 

@@ -264,8 +264,8 @@ class BaccusOptimizer:
             # 飽和ペナルティ 
             # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
             # ここでは簡単に「u_tの分散が小さすぎる場合」を検知
-            if np.std(u_t) < 0.1:  # 閾値は調整が必要
-                print("Penalty: Saturation detected")
+            if np.std(u_t) < 1e-6:  # 閾値は調整が必要
+                print("Penalty: Saturation detected", end='\r', flush=True)
                 return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
             # Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
