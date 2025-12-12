@@ -56,18 +56,19 @@ def load_data(config_path):
     return norm_input, norm_output, dt
 
 def load_params_from_dir(results_dir):
-    """パラメータ読み込み関数 (単一ファイルと個別ファイルの両方に対応)"""
+    """パラメータ読み込み関数"""
     params = {}
     
     # パラメータ名の順序 (J個のalphasの直後から)
+    # ★ w_gain, w_decay を追加
     keys_order = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
+                  'w_gain', 'w_decay',
                   'p_R', 'p_A', 'p_I1', 'p_I2']
     
     # 1. 個別ファイル (L*.txt) があるかチェック
     l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
     
     if l_files:
-        # 個別ファイルからロード
         l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
         alphas = [float(np.loadtxt(f)) for f in l_files]
         params['alphas'] = np.array(alphas)
@@ -78,14 +79,13 @@ def load_params_from_dir(results_dir):
             if os.path.exists(p_path):
                 params[k] = float(np.loadtxt(p_path))
             else:
-                params[k] = 0.0 # デフォルト
+                params[k] = 0.0 
         print(f"Loaded from individual files. J={params['J']}")
         
     else:
-        # 2. 個別ファイルがない場合、epochsフォルダの最新ファイルをロード
+        # 2. まとまったファイルから
         epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
         if not epoch_files:
-            # 念のためルートディレクトリの epoch_*.txt も探す
             epoch_files = glob.glob(os.path.join(results_dir, "epoch_*_params.txt"))
             
         if epoch_files:
@@ -93,8 +93,8 @@ def load_params_from_dir(results_dir):
             print(f"Loading from single file: {latest_file}")
             vals = np.loadtxt(latest_file)
             
-            # Jの推定: 全パラメータ数 - スカラーパラメータ数(14)
-            J = len(vals) - 14
+            # Jの推定: 全パラメータ数 - スカラーパラメータ数(16)
+            J = len(vals) - 16
             params['J'] = J
             params['alphas'] = vals[0:J]
             
@@ -114,33 +114,25 @@ def normalize_states(p_R, p_A, p_I1, p_I2):
 
 def run_prediction(params, Input, dt, tau=1.0):
     """
-    モデルを実行し、中間出力(g_t, u_t)も含めて返す
-    【重要】BaccusModel.py と同じロジックで計算する
+    モデルを実行し、g_t, u_t, W (電流) を返す
     """
     R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
     
-    # 1. Linear Filter カーネル生成 (長さを制限)
+    # 1. Linear Filter
     filter_points = int(tau / dt) + 1
     linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], filter_points, dt, tau)
     
-    # mode='full' で畳み込み & シフト処理
     g_full = fftconvolve(Input, linear_filter_kernel, mode='full')
-    
-    # シフト量
     shift_idx = int(tau / dt) 
     
-    # シフトして切り出し
     if len(g_full) > shift_idx + len(Input):
         g_t = g_full[shift_idx : shift_idx + len(Input)]
     else:
         g_t = g_full[:len(Input)]
     
-    # --- 【ここを追加】 強制正規化 ---
-    # BaccusModel.py と同様に、ここでも正規化しないとグラフ2が±100になってしまいます
     g_std = np.std(g_t)
     if g_std > 1e-9:
         g_t = g_t / g_std
-    # -----------------------------
 
     # 2. Nonlinear Module
     u_t = N_LNK.main(
@@ -152,15 +144,17 @@ def run_prediction(params, Input, dt, tau=1.0):
         params['ka']
     )
     
-    # 3. Kinetic Model
-    R, A, I1, I2, check = K_LNK.main(
+    # 3. Kinetic Model (6つの戻り値を受け取る)
+    R, A, I1, I2, W, check = K_LNK.main(
         len(u_t), u_t, dt, 
         R0, A0, I10, I20,
         params['ka'], params['kfi'], params['kfr'], params['ksi'], params['ksr'],
+        params['w_gain'], params['w_decay'], # ★追加
         label="Validation"
     )
     
-    return g_t, u_t, A, check
+    # W (Current) を予測値として返す
+    return g_t, u_t, W, check
 
 def main():
     # ================= 設定エリア =================
@@ -184,57 +178,70 @@ def main():
     Output_exp = Output_exp[:min_len]
 
     print("Running model prediction...")
-    g_t, u_t, Prediction, check = run_prediction(params, Input, dt, tau=TAU)
+    # W_raw (生の電流値) を受け取る
+    g_t, u_t, W_raw, check = run_prediction(params, Input, dt, tau=TAU)
     
     if check != 1:
         print("Kineticモデル計算失敗。")
-        Prediction = np.zeros_like(Output_exp)
+        W_raw = np.zeros_like(Output_exp)
         corr = 0.0
     
-    min_len_eval = min(len(Output_exp), len(Prediction), len(g_t), len(u_t))
+    min_len_eval = min(len(Output_exp), len(W_raw), len(g_t), len(u_t))
     Output_exp = Output_exp[:min_len_eval]
-    Prediction = Prediction[:min_len_eval]
+    W_raw = W_raw[:min_len_eval]
     g_t = g_t[:min_len_eval]
     u_t = u_t[:min_len_eval]
     Input_plot = Input[:min_len_eval]
 
-    # --- データの保存 (predict.txt用) ---
-    # Predictionを「平均0, 最大値1」に変換
-    if check == 1 and len(Prediction) > 0:
-        Prediction = Prediction - np.mean(Prediction)
-        p_max = np.max(Prediction)
-        if p_max > 1e-9:
-            Prediction = Prediction / p_max
+    # --- データの保存 ---
+    
+    # 1. predict.txt (相関計算用の正規化後データ)
+    # DE_Simulationでは (-1 * w) と相関を見ていたので、ここでも反転させる
+    Prediction = -1.0 * W_raw 
+    
+    # 平均0, 最大絶対値1に正規化 (比較用)
+    Prediction = Prediction - np.mean(Prediction)
+    p_max = np.max(np.abs(Prediction))
+    if p_max > 1e-9:
+        Prediction = Prediction / p_max
 
-    # --- マスクデータの作成 (masked_pre.txt用) ---
+    # 2. masked_pre.txt (マスク済み)
     masked_pre = Prediction.copy()
-    mask_steps = int(1.0 / dt) # 最初の1秒
+    mask_steps = int(1.0 / dt)
     if mask_steps > len(masked_pre): mask_steps = len(masked_pre)
 
-    # 1秒以降の平均値で埋める
     if len(masked_pre) > mask_steps:
         fill_val = np.mean(masked_pre[mask_steps:])
     else:
         fill_val = 0.0
     masked_pre[:mask_steps] = fill_val
     
-    # 再度「平均0, 最大値1」
-    masked_pre = masked_pre - np.mean(masked_pre)
-    mp_max = np.max(masked_pre)
-    if mp_max > 1e-9:
-        masked_pre = masked_pre / mp_max
-
-    # 相関計算
+    # 相関計算 (マスク済みデータで計算)
     if check == 1:
-        corr, _ = spearmanr(Output_exp, Prediction)
-        print(f"Spearman Correlation: {corr:.6f}")
+        # 実データ(Output_exp)と予測(masked_pre)の相関
+        # Output_expもマスク範囲を除外して計算するのが厳密だが、
+        # ここではグラフ表示用に全体で計算するか、マスク後で計算するか選択。
+        # BaccusModel.pyと同様にマスク後の部分だけで計算して表示する
+        if len(Output_exp) > mask_steps:
+             corr, _ = spearmanr(Output_exp[mask_steps:], masked_pre[mask_steps:])
+        else:
+             corr, _ = spearmanr(Output_exp, masked_pre)
+        print(f"Spearman Correlation (Masked): {corr:.6f}")
 
     # 保存
     save_dir = os.path.join(RESULTS_DIR, "validation")
     os.makedirs(save_dir, exist_ok=True)
+    
     np.savetxt(os.path.join(save_dir, "g.txt"), g_t, fmt='%.6f')
     np.savetxt(os.path.join(save_dir, "u.txt"), u_t, fmt='%.6f')
+    
+    # リクエスト: r.txt には生の出力 (ここでは電流 W_raw) を保存
+    # (もしくは 受容体活性 A が見たければ A を返す必要がありますが、文脈的に W の生データと解釈)
+    np.savetxt(os.path.join(save_dir, "r.txt"), W_raw, fmt='%.6f')
+    
+    # リクエスト: predict.txt には正規化後の予測応答
     np.savetxt(os.path.join(save_dir, "predict.txt"), Prediction, fmt='%.6f')
+    
     np.savetxt(os.path.join(save_dir, "masked_pre.txt"), masked_pre, fmt='%.6f')
     print(f"保存完了: {save_dir}")
 
@@ -261,13 +268,14 @@ def main():
     axes[2].plot(time_axis, u_t, color='green', linewidth=1)
     setup_axis(axes[2], '3. Nonlinear Output u(t)', 'Rate (u)')
 
+    # 4段目: 実測値 vs 予測値 (電流)
     axes[3].plot(time_axis, Output_exp, color='black', alpha=0.5, label='Experiment', linewidth=1.5)
-    axes[3].plot(time_axis, masked_pre, color='red', alpha=0.8, label=f'Model (Corr={corr:.3f})', linewidth=1.5)
-    setup_axis(axes[3], '4. Final Response (Masked Prediction)', 'Response')
+    axes[3].plot(time_axis, masked_pre, color='red', alpha=0.8, label=f'Model Current (Corr={corr:.3f})', linewidth=1.5)
+    setup_axis(axes[3], '4. Final Response (Synaptic Current W)', 'Response')
     axes[3].legend()
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "detailed_analysis_normalized.png"))
+    plt.savefig(os.path.join(save_dir, "detailed_analysis_current.png"))
     print("グラフ保存完了")
 
 if __name__ == "__main__":
