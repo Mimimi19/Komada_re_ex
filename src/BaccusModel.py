@@ -252,7 +252,7 @@ class BaccusOptimizer:
                 print("Penalty: Saturation detected", end='\r', flush=True)
                 return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
             # Kinetic Model
-            R_state, A_state, I1_state, I2_state, check = K_LNK.main(
+            R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, 
                 w_gain, w_decay,
