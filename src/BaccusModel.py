@@ -69,7 +69,6 @@ class BaccusOptimizer:
         self.cfg = cfg
         # I2を使用するかどうかのフラグ
         self.use_I2 = self.cfg.hyper_params.get('use_I2', True)
-        
         self.total_lnk_model_runs = 0
         self.failed_lnk_model_runs = 0
         self.current_epoch_best_fun_value = 1000.0  # 最小化問題なので初期値は大きな値
@@ -92,30 +91,24 @@ class BaccusOptimizer:
             
         print(f"最適化開始時間: {start_time}\n")
         print(f"データセット '{self.cfg.data.name}' を使用します。")
-        print(f"入力データ: {input_path}")
-        print(f"出力データ: {output_path}")
         
         if not self.use_I2:
-            print("\n--- 警告 ---")
-            print("hyper_params.use_I2 が False に設定されています。")
-            print("I2 state (p_I2, ksi, ksr) は強制的に 0.0 として扱われます。")
-            print("------------\n")
+            print("--- 警告: use_I2 = False ---")
         else:
             print("\nI2 state (p_I2, ksi, ksr) は最適化対象に含まれます。\n")
 
-        # 1. 入力データの正規化 (Z-score Standardization)
-        # 光刺激は「平均からの変化量(コントラスト)」として扱うのがモデルにとって最適です。
+        # 入力データの正規化
         raw_input = np.genfromtxt(input_path)
         input_std = np.std(raw_input)
         if input_std > 1e-9: # ゼロ除算防止
-            # 平均を0、標準偏差を1にする（これでどんな単位のデータが来てもモデルへの入力は -2.0 ~ +2.0 程度に収まります）
+            # 平均を0、標準偏差を1にする（これでどんな単位のデータが来てもモデルへの入力は -2.0 ~ +2.0 程度に収まる）
             Input_full = (raw_input - np.mean(raw_input)) / input_std
         else:
             # 変化がないデータの場合（エラー回避）
             Input_full = raw_input - np.mean(raw_input)
 
-        # 2. 出力データの正規化 (Max-Abs Scaling)
-        # カルシウム応答などの生体信号は単位が実験ごとに違うため、最大値が 1.0 になるように揃えます。
+        # 出力データの正規化 
+        # カルシウム応答などの生体信号は単位が実験ごとに違うため、最大値が 1.0 になるように揃える
         raw_output = np.genfromtxt(output_path)
         max_val = np.max(np.abs(raw_output))
         if max_val > 1e-9: # ゼロ除算防止
@@ -125,7 +118,7 @@ class BaccusOptimizer:
                 
         self.J = self.cfg.hyper_params.J
         
-        # データの最初と最後をトリミング
+        # トリミング処理
         try:
             dt = self.cfg.data.dt  # サンプリング間隔 (秒)
             trim_i_seconds = self.cfg.hyper_params.trim_I_seconds # 入力データのトリミング秒数
@@ -144,7 +137,6 @@ class BaccusOptimizer:
                 self.Output = Output_full
             else:
                 start_index = trim_i_indices
-                
                 if trim_o_indices > 0:
                     end_index = -trim_o_indices 
                 else:
@@ -156,17 +148,9 @@ class BaccusOptimizer:
                 print(f"\n--- データトリミング (前{trim_i_seconds}秒, 後{trim_o_seconds}秒) ---")
                 print(f"dt={dt}s のため、前{trim_i_indices}インデックス、後{trim_o_indices}インデックスをトリミングします。")
                 
-                # 表示用の終端インデックスを計算
-                end_idx_pos_in = len(Input_full) - trim_o_indices - 1
-                end_idx_pos_out = len(Output_full) - trim_o_indices - 1
-                
-                print(f"Input: {len(Input_full)} -> {len(self.Input)} (インデックス {start_index} から {end_idx_pos_in} を使用)")
-                print(f"Output: {len(Output_full)} -> {len(self.Output)} (インデックス {start_index} から {end_idx_pos_out} を使用)")
-                print(f"----------------------------------\n")
                 
         except Exception as e:
-            print(f"エラー: データトリミング中に失敗しました。{e}")
-            print("トリミングせずに処理を続行します。")
+            print(f"トリミング失敗: {e}")
             self.Input = Input_full
             self.Output = Output_full
         
@@ -175,20 +159,15 @@ class BaccusOptimizer:
         self.results_dir = os.path.join(base_dir, 'scripts', 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
         os.makedirs(self.results_dir, exist_ok=True)
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
-        
+
     def _normalize_states(self, p_R, p_A, p_I1, p_I2):
         """
         初期占有率の比率を正規化し、合計1.0のタプルを返すヘルパー関数。
         """
         # use_I2: false の場合、p_I2 は 0.0 が渡される想定
         total = p_R + p_A + p_I1 + p_I2
-        
-        if total > 1e-9: # ゼロ除算を回避
-            R_start = p_R / total
-            A_start = p_A / total
-            I1_start = p_I1 / total
-            I2_start = p_I2 / total
-            return R_start, A_start, I1_start, I2_start
+        if total > 1e-9:
+            return p_R/total, p_A/total, p_I1/total, p_I2/total
         else:
             # オプティマイザが全て0を提案した場合のフォールバック
             # (この試行はペナルティ(相関1.0)を受ける)
@@ -204,25 +183,30 @@ class BaccusOptimizer:
             hp = self.cfg.hyper_params
             dt = self.cfg.data.dt
             tau = hp.tau
-            
             J = self.J
             
+            # --- パラメータのアンパッキング (順番に注意) ---
             alphas = x[0:J]
             delta = x[J]
             a_nonlinear = x[J+1]
             kappa_nonlinear = x[J+2]
             b1_nonlinear = x[J+3]
             b2_nonlinear = x[J+4]
+            
             ka_kinetic = x[J+5]
             kfi_kinetic = x[J+6]
             kfr_kinetic = x[J+7]
             ksi_kinetic = x[J+8]
             ksr_kinetic = x[J+9]
+            # シナプス後電流のパラメータ
+            w_gain = x[J+10]
+            w_decay = x[J+11]
+            
             # 各占有率の初期値
-            p_R = x[J+10]
-            p_A = x[J+11]
-            p_I1 = x[J+12]
-            p_I2 = x[J+13]
+            p_R = x[J+12]
+            p_A = x[J+13]
+            p_I1 = x[J+14]
+            p_I2 = x[J+15]
             
             if not self.use_I2:
                 ksi_kinetic = 0.0
@@ -270,31 +254,33 @@ class BaccusOptimizer:
             # Kinetic Model
             R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
-                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
+                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, 
+                w_gain, w_decay,
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
             
             with open(self.debug_log_path, "a") as f:
                 f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
-                
+            
             print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
-                # 1. まずデータ長を合わせる
-                current_len = len(A_state)
+                current_len = len(W_state)
                 output_aligned = self.Output[:current_len]
-                model_aligned = A_state  # A_stateはマスク前の生データを使う
+                
+    
+                # DE_Simulationでは (-1 * w) と Output の相関を見ているため、ここでも -W を使う
+                model_aligned = -1.0 * W_state 
 
-                # 2. 万が一長さが合わない場合の安全策
                 if len(output_aligned) != len(model_aligned):
                      min_l = min(len(output_aligned), len(model_aligned))
                      output_aligned = output_aligned[:min_l]
                      model_aligned = model_aligned[:min_l]
 
                 # 3. マスク処理: 最初の 1秒スライスして捨てる、Aの初期値依存部分を評価から除外
-                mask_seconds = 1.0  # または 2.0
+                mask_seconds = 1.0 
                 mask_idx = int(mask_seconds / dt)
 
                 if mask_idx < len(output_aligned):
@@ -306,18 +292,19 @@ class BaccusOptimizer:
                     # 標準偏差チェック（平坦な線になっていないか）
                     if np.std(model_eval) > 1e-9 and np.std(output_eval) > 1e-9:
                         corr_val, _ = spearmanr(output_eval, model_eval)
-                        correlation = -1 * corr_val
+                        # 最大化問題 -> 最小化問題への変換 (-1をかける)
+                        correlation = -1 * corr_val 
                     else:
                         correlation = 0.0 # 平坦ならスコアなし
                 else:
-                    correlation = 1.0 
+                    correlation = 1.0
             else:
                 self.failed_lnk_model_runs += 1
             
             self.current_epoch_best_fun_value = correlation
 
             if save_states:
-                return correlation, R_state, A_state, I1_state, I2_state
+                return correlation, R_state, A_state, I1_state, I2_state, W_state
             else:
                 return correlation
 
@@ -335,6 +322,7 @@ class BaccusOptimizer:
         
         self.epoch_counter += 1
         current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
+        
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)
         save_results(xk, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_params.txt'))
@@ -345,13 +333,8 @@ class BaccusOptimizer:
         intermediate_params = {
             **{f'L{i+1}': xk[i] for i in range(self.J)},
             'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
-            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 
-            'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
-            # 占有率
-            'p_R': xk[self.J+10],
-            'p_A': xk[self.J+11],
-            'p_I1': xk[self.J+12],
-            'p_I2': xk[self.J+13]
+            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
+            'w_gain': xk[self.J+10], 'w_decay': xk[self.J+11], 'p_R': xk[self.J+12], 'p_A': xk[self.J+13], 'p_I1': xk[self.J+14], 'p_I2': xk[self.J+15]
         }
         
         # mlflow.log_metrics を使って辞書の中身を一度に記録
@@ -361,16 +344,13 @@ class BaccusOptimizer:
         mlflow.log_metrics(metrics_to_log, step=self.epoch_counter)
 
         timestamp = time.strftime("%d_%H:%M:%S")
-        tqdm.write(
-            # 表示する値も再計算したものを使用する
-            f"---{timestamp} | Epoch {self.epoch_counter:03d} Saved | Correlation: {current_best_correlation_value:.4f} ---"
-        )
-    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
+        tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
+
+    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, W_state):
         """
         最終的な最適化結果を保存します。
         """
         print(f"\n最適化結果を {self.results_dir} に保存中...")
-
         try:
             param_map = {}
             
@@ -388,6 +368,7 @@ class BaccusOptimizer:
             param_keys = [
                 'delta', 'a', 'kappa', 'b1', 'b2', 
                 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
+                'w_gain', 'w_decay', # Added
                 'p_R', 'p_A', 'p_I1', 'p_I2'
             ]
             
@@ -421,17 +402,15 @@ class BaccusOptimizer:
                     # 個別のファイル保存に失敗しても他は保存し続ける
                     save_results(val, os.path.join(self.results_dir, f'{name}.txt'))
                     saved_count += 1
-                except Exception as e:
-                    print(f"警告: {name}.txt の保存に失敗しました: {e}")
-
-            print(f"パラメータ保存完了: {saved_count}/{len(param_map)} ファイル")
+                except Exception:
+                    pass
 
             # --- MLflowへの記録 ---
             try:
                 final_metrics = {f"optimal_{k}": v for k, v in param_map.items()}
                 mlflow.log_metrics(final_metrics)
-            except Exception as e:
-                print(f"警告: MLflowへのメトリクス送信に失敗しました: {e}")
+            except Exception:
+                pass
 
             # --- 時系列状態変数の保存 ---
             state_dir = os.path.join(self.results_dir, 'state')
@@ -441,13 +420,12 @@ class BaccusOptimizer:
             save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
             save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
             save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
+            save_results(W_state, os.path.join(state_dir, 'W_state.txt')) # Added
             
             print("すべての保存処理が完了しました。")
             
         except Exception as e:
-            print(f"重大なエラー: save_optimal_results 内で予期せぬエラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error saving results: {e}")
             
     def run(self):
         """
@@ -456,8 +434,8 @@ class BaccusOptimizer:
         # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
         print("Numba JITコンパイラのウォームアップ中...")
         try:
-            # ダミーのパラメータ配列 (長さ: J + 14) を作成
-            x_dummy = np.ones(self.J + 14) 
+            # ダミーのパラメータ配列 (長さ: J + 16) を作成
+            x_dummy = np.ones(self.J + 16) 
             # 目的関数を一度だけ実行して、コンパイルを強制する
             self.lnk_model(x_dummy, save_states=False)
             print("ウォームアップ完了。最適化を開始します。")
@@ -469,53 +447,48 @@ class BaccusOptimizer:
         pb = self.cfg.hyper_params.param_bounds
         J = self.J
         
-        # alphas (L1-L15) の境界を生成
+        # alphas (L1-LJ) の境界を生成
         alpha_bounds_tuple = tuple(pb.LinearFilter.alphas)
         try_bounds = [alpha_bounds_tuple] * J
         
-        #    Configのリスト [min, max] を tuple(min, max) に変換
+        #Configのリスト [min, max] を tuple(min, max) に変換
         try:
             try_bounds.extend([
-                # LinearFilter
                 tuple(pb.LinearFilter.delta),
-                # Nonlinear
                 tuple(pb.Nonlinear.a),
                 tuple(pb.Nonlinear.kappa),
                 tuple(pb.Nonlinear.b1),
                 tuple(pb.Nonlinear.b2),
-                # Kinetics
                 tuple(pb.Kinetics.ka),
                 tuple(pb.Kinetics.kfi),
                 tuple(pb.Kinetics.kfr),
                 tuple(pb.Kinetics.ksi),
                 tuple(pb.Kinetics.ksr),
-            # InitialStates 
+                # ★ 追加されたパラメータの範囲
+                tuple(pb.Kinetics.w_gain),
+                tuple(pb.Kinetics.w_decay),
+                # 初期状態
                 tuple(pb.InitialStates.p_R),
                 tuple(pb.InitialStates.p_A),
                 tuple(pb.InitialStates.p_I1),
                 tuple(pb.InitialStates.p_I2)
             ])
         except Exception as e:
-            print(f"エラー: config.yaml の 'param_bounds' 設定が不足しています。")
-            print("param_bounds に 'InitialStates' (p_R, p_A, p_I1, p_I2) が正しく定義されているか確認してください。")
-            print(f"詳細: {e}")
+            print(f"Config Error: {e}")
             raise
 
         
         #use_I2=False の場合、探索範囲を [0, 0] に固定
         if not self.use_I2:
             print("I2が無効なため、ksi, ksr, p_I2 の探索範囲を [0.0, 0.0] に固定します。")
-            ksi_index = J + 8
-            ksr_index = J + 9
-            p_I2_index = J + 13 # p_I2 のインデックス
-            
-            try_bounds[ksi_index] = (0.0, 0.0)
-            try_bounds[ksr_index] = (0.0, 0.0)
-            try_bounds[p_I2_index] = (0.0, 0.0) # I2の比率も0に固定
-        # パラメータ探索範囲(try_bounds)をMLflowに記録する
+            # インデックスもずれるので注意: ksrは J+9
+            try_bounds[J + 8] = (0.0, 0.0) # ksi
+            try_bounds[J + 9] = (0.0, 0.0) # ksr
+            try_bounds[J + 15] = (0.0, 0.0) # p_I2
+
         param_names = [f'L{i+1}' for i in range(self.J)] + [
             'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-            'p_R', 'p_A', 'p_I1', 'p_I2'
+            'w_gain', 'w_decay', 'p_R', 'p_A', 'p_I1', 'p_I2'
         ]
 
         #MLflowに記録するための辞書を作成
@@ -567,11 +540,10 @@ class BaccusOptimizer:
         print("\n大域探索 (DE) が完了しました。")
         print(f"DE 最良スコア: {-de_result.fun:.6f}")
         print("最適な結果を初期値として局所探索 (Powell) を開始します... (Phase 2: Refinement)")
-
-        #局所探索 (Powell法で解を「磨き上げ」)
+        
+        #局所探索 (Powell)
         # config.yaml に local_maxiter を追加するか、ここではDEのイテレーション数を流用
         local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2) 
-
         result = minimize(
             self.lnk_model,          # 目的関数
             de_result.x,             # DEで見つけた最適解を初期値 (x0) に設定
@@ -612,11 +584,13 @@ class BaccusOptimizer:
         optimal_params = result.x
         optimal_correlation = -result.fun
 
-        print("\n最終的な状態を取得するため、最適なパラメータでモデルを再実行します...")
-        _, r_final, a_final, i1_final, i2_final = self.lnk_model(optimal_params, save_states=True)
-
-        if a_final is not None:
-            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final)
+        # 戻り値受け取り変更
+        res_tuple = self.lnk_model(optimal_params, save_states=True)
+        # res_tuple: (corr, R, A, I1, I2, W)
+        
+        if len(res_tuple) == 6:
+            _, r_final, a_final, i1_final, i2_final, w_final = res_tuple
+            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final, w_final)
             mlflow.log_artifacts(self.results_dir, artifact_path="results")
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
@@ -645,7 +619,6 @@ def main(cfg: DictConfig):
     if tracking_uri:
         print(f"MLflowの保存先をNAS ({tracking_uri}) に設定します。")
         mlflow.set_tracking_uri(tracking_uri)
-            
     else:
         print(f"警告: .envファイルまたは MLFLOW_TRACKING_URI が見つかりません。")
         print("フォールバック: ローカルの 'scripts/mlruns' を使用します。")
@@ -688,8 +661,13 @@ def main(cfg: DictConfig):
     # Run（実行）を開始。with文を使うと、ブロックを抜ける際に自動で終了処理が行われる
     # run_nameで、UIに表示される実行の名前を設定
     
-    use_I2_str = "I2-True" if cfg.hyper_params.get('use_I2', True) else "I2-False"
-    run_name = f"{cfg.optimization.strategy}_{time.strftime('%Y%m%d_%H')}"
+    # I2の使用有無をラベル化
+    use_I2_str = "I2_ON" if cfg.hyper_params.get('use_I2', True) else "I2_OFF"
+    
+    # 以前の行で作成した strategy_str_for_name を利用する
+    # 例: rand/1/exp_I2_ON_20231025_1200
+    run_name = f"{strategy_str_for_name}_{use_I2_str}_{time.strftime('%Y%m%d_%H%M')}"
+
     with mlflow.start_run(run_name=run_name):
         flat_params = flatten_dict_config(cfg)# Hydraの設定（ハイパーパラメータ）をMLflowに記録
         mlflow.log_params(flat_params) # ネストした設定ファイルが見やすいようにフラット化する
