@@ -24,24 +24,22 @@ def load_yaml(path):
 def load_data(config_path):
     """データをロードし、学習時と同じ正規化を行う"""
     cfg = load_yaml(config_path)
-    base_dir = os.path.dirname(config_path)
     input_path = cfg['input_file']
     output_path = cfg['output_file']
     dt = cfg['dt']
 
     print(f"Loading data from: {input_path}")
-    
     raw_input = np.genfromtxt(input_path)
     raw_output = np.genfromtxt(output_path)
 
-    # 1. Input: Z-score 正規化
+    # Input: Z-score 正規化
     input_std = np.std(raw_input)
     if input_std > 1e-9:
         norm_input = (raw_input - np.mean(raw_input)) / input_std
     else:
         norm_input = raw_input - np.mean(raw_input)
 
-    # 2. Output: Max-Abs Scaling
+    # Output: Max-Abs Scaling
     max_val = np.max(np.abs(raw_output))
     if max_val > 1e-9:
         norm_output = raw_output / max_val
@@ -51,74 +49,29 @@ def load_data(config_path):
     return norm_input, norm_output, dt
 
 def load_params_from_dir(results_dir):
-    """
-    パラメータ読み込み関数 (自動復元機能付き)
-    """
+    """パラメータ読み込み"""
     params = {}
-    
-    # 1. フィルタ長 J の推定
     l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
-    if not l_files:
-        J = 50 # Lファイルがない場合の仮定値
-    else:
-        J = len(l_files)
-    params['J'] = J
-
-    # 2. 読み込むべきパラメータ一覧
-    keys_order = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
-                  'p_R', 'p_A', 'p_I1', 'p_I2']
+    alphas = []
+    # L1, L2... の順にソート
+    l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
     
-    # 3. 欠損ファイルのチェック
-    missing_files = []
-    for k in keys_order:
-        if not os.path.exists(os.path.join(results_dir, f"{k}.txt")):
-            missing_files.append(k)
+    for f in l_files:
+        val = np.loadtxt(f)
+        alphas.append(float(val))
+    
+    params['alphas'] = np.array(alphas)
+    params['J'] = len(alphas)
 
-    # 4. 欠損がある場合は、epochsフォルダから最新のパラメータをロードして復元
-    if missing_files or not l_files:
-        print(f"警告: 以下のパラメータファイルが見つかりません: {missing_files}")
-        print("epochsフォルダから最新のパラメータセットを復元します...")
-        
-        epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
-        if not epoch_files:
-            print("エラー: epochsフォルダにもデータがありません。デフォルト値を使用します。")
-            defaults = {'b2': 1.0, 'ka': 1.0, 'kappa': 1.0, 'a': 10.0}
-            for k in keys_order:
-                params[k] = defaults.get(k, 1.0)
-            if 'alphas' not in params: params['alphas'] = np.zeros(J)
-            return params
-            
-        latest_file = max(epoch_files, key=lambda x: int(os.path.basename(x).split('_')[1]))
-        print(f"最新のエポックファイルを使用: {latest_file}")
-        
-        x = np.loadtxt(latest_file)
-        
-        params['alphas'] = x[0:J]
-        current_idx = J
-        for k in keys_order:
-            if current_idx < len(x):
-                params[k] = float(x[current_idx])
-            else:
-                params[k] = 1.0
-            current_idx += 1
-            
-        print(f"パラメータの復元に成功しました。 (b2={params.get('b2'):.4f}, kappa={params.get('kappa'):.4f})")
-        
-    else:
-        alphas = []
-        l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
-        for f in l_files:
-            alphas.append(float(np.loadtxt(f)))
-        params['alphas'] = np.array(alphas)
-        
-        for k in keys_order:
-            params[k] = float(np.loadtxt(os.path.join(results_dir, f"{k}.txt")))
-
-    # 5. ゼロ除算防止
-    if params.get('b2', 0) == 0: params['b2'] = 1e-6
-    if params.get('kappa', 0) == 0: params['kappa'] = 1e-6
-    if params.get('ka', 0) == 0: params['ka'] = 1e-6
-            
+    keys = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
+            'p_R', 'p_A', 'p_I1', 'p_I2']
+    
+    for k in keys:
+        path = os.path.join(results_dir, f"{k}.txt")
+        if os.path.exists(path):
+            params[k] = float(np.loadtxt(path))
+        else:
+            params[k] = 0.0
     return params
 
 def normalize_states(p_R, p_A, p_I1, p_I2):
@@ -130,23 +83,32 @@ def normalize_states(p_R, p_A, p_I1, p_I2):
 def run_prediction(params, Input, dt, tau=1.0):
     """
     モデルを実行し、中間出力(g_t, u_t)も含めて返す
+    【重要】BaccusModel.py と同じロジックで計算する
     """
     R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
-    t_len = len(Input)
-
-    # 1. Linear Filter
-    linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], t_len, dt, tau)
     
-    # 畳み込みとシフト調整
+    # 1. Linear Filter カーネル生成 (長さを制限)
+    filter_points = int(tau / dt) + 1
+    linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], filter_points, dt, tau)
+    
+    # --- 修正箇所: mode='full' で畳み込み & シフト処理 ---
     g_full = fftconvolve(Input, linear_filter_kernel, mode='full')
-    filter_len = int(tau / dt)
-    shift_idx = len(linear_filter_kernel) - filter_len
-    if shift_idx < 0: shift_idx = 0
-    if shift_idx >= len(g_full): shift_idx = 0
     
-    g_t = g_full[shift_idx : shift_idx + t_len]
+    # シフト量
+    shift_idx = int(tau / dt) 
     
-    # 2. Nonlinear Module (u_t)
+    # シフトして切り出し (入力と同じ長さに合わせる)
+    if len(g_full) > shift_idx + len(Input):
+        g_t = g_full[shift_idx : shift_idx + len(Input)]
+    else:
+        g_t = g_full[:len(Input)]
+    
+    # --- 修正箇所: 強制正規化 ---
+    g_std = np.std(g_t)
+    if g_std > 1e-9:
+        g_t = g_t / g_std
+
+    # 2. Nonlinear Module
     u_t = N_LNK.main(
         g_t, 
         params['a'], 
@@ -156,7 +118,7 @@ def run_prediction(params, Input, dt, tau=1.0):
         params['ka']
     )
     
-    # 3. Kinetic Model (A)
+    # 3. Kinetic Model
     R, A, I1, I2, check = K_LNK.main(
         len(u_t), u_t, dt, 
         R0, A0, I10, I20,
@@ -168,9 +130,10 @@ def run_prediction(params, Input, dt, tau=1.0):
 
 def main():
     # ================= 設定エリア =================
-    # DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
-    DATA_CONFIG_PATH = "config/data/Ucb2.yaml"
-    RESULTS_DIR = "scripts/20251208_00" 
+    # DATA_CONFIG_PATH = "config/data/Ucb2.yaml"
+    DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
+    # 最新の結果ディレクトリを指定してください
+    RESULTS_DIR = "scripts/results/Baccus_cb1/20251212_12" 
     TAU = 1.0 
     # ============================================
 
@@ -186,66 +149,56 @@ def main():
     
     # パラメータロード
     print(f"Loading parameters from {RESULTS_DIR}...")
-    params = load_params_from_dir(RESULTS_DIR)
+    try:
+        params = load_params_from_dir(RESULTS_DIR)
+    except Exception as e:
+        print(f"パラメータ読み込みエラー: {e}")
+        return
 
     # 長さ合わせ
     min_len = min(len(Input), len(Output_exp))
     Input = Input[:min_len]
     Output_exp = Output_exp[:min_len]
 
-    # 予測実行 (中間出力も取得)
+    # 予測実行
     print("Running model prediction...")
     g_t, u_t, Prediction, check = run_prediction(params, Input, dt, tau=TAU)
     
-    # 結果の整形
-    if check != 1:
-        print("\n!!!!!!!! 警告 !!!!!!!!")
-        print("Kineticモデルの計算が失敗しました。予測値はゼロ埋めされます。")
-        Prediction = np.zeros_like(Output_exp)
-        corr = 0.0
-    
-    # 最終的な長さ合わせ (計算過程でずれる可能性があるため)
-    min_len_eval = min(len(Output_exp), len(Prediction), len(g_t), len(u_t))
-    
-    Output_exp = Output_exp[:min_len_eval]
-    Prediction = Prediction[:min_len_eval]
-    g_t = g_t[:min_len_eval]
-    u_t = u_t[:min_len_eval]
-    Input_plot = Input[:min_len_eval]
-
-    # ================= 正規化処理 (追加) =================
-    # Predictionを「平均0, 最大値1」に変換
-    if check == 1 and len(Prediction) > 0:
-        # 1. 平均を引いてゼロセンター化
-        Prediction = Prediction - np.mean(Prediction)
-        
-        # 2. 最大値で割ってスケーリング (Max=1)
-        p_max = np.max(Prediction)
-        if p_max > 1e-9: # ゼロ除算防止
-            Prediction = Prediction / p_max
-            
-        print(f"Prediction Normalized: Mean={np.mean(Prediction):.4f}, Max={np.max(Prediction):.4f}")
-    # ====================================================
-
+    # 相関計算 (マスク適用)
+    corr = 0.0
     if check == 1:
-        corr, _ = spearmanr(Output_exp, Prediction)
-        print(f"Spearman Correlation: {corr:.6f}")
+        # 長さ調整
+        min_len_eval = min(len(Output_exp), len(Prediction))
+        Output_exp = Output_exp[:min_len_eval]
+        Prediction = Prediction[:min_len_eval]
+        g_t = g_t[:min_len_eval]
+        u_t = u_t[:min_len_eval]
+        Input_plot = Input[:min_len_eval]
 
-    # ================= 保存処理 =================
+        # 最初の1秒を無視して相関計算
+        mask_seconds = 1.0
+        mask_idx = int(mask_seconds / dt)
+        
+        if mask_idx < len(Prediction):
+            val_pred = Prediction[mask_idx:]
+            val_exp = Output_exp[mask_idx:]
+            if np.std(val_pred) > 1e-9:
+                corr, _ = spearmanr(val_exp, val_pred)
+            else:
+                corr = 0.0
+        print(f"Spearman Correlation (masked): {corr:.6f}")
+    else:
+        print("Kineticモデル計算失敗")
+        Prediction = np.zeros_like(Output_exp)
+        Input_plot = Input
+
+    # ================= プロット作成 =================
     save_dir = os.path.join(RESULTS_DIR, "validation")
     os.makedirs(save_dir, exist_ok=True)
-
-    print("時系列データを保存中...")
-    np.savetxt(os.path.join(save_dir, "g.txt"), g_t, fmt='%.6f')
-    np.savetxt(os.path.join(save_dir, "u.txt"), u_t, fmt='%.6f')
-    np.savetxt(os.path.join(save_dir, "predict.txt"), Prediction, fmt='%.6f')
-    print(f"保存完了: {save_dir}/{{g.txt, u.txt, predict.txt}}")
-    # ============================================
-
-    # プロット作成 (4段構成)
+    
     total_time = len(Input_plot) * dt
     time_axis = np.arange(len(Input_plot)) * dt
-    major_ticks = np.arange(0, int(total_time) + 1, 1)
+    major_ticks = np.arange(0, int(total_time) + 1, 5) # 5秒刻み
 
     fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=False) 
     
@@ -258,26 +211,22 @@ def main():
         ax.tick_params(axis='x', labelbottom=True) 
         ax.set_xlabel('Time (s)', fontsize=10) 
 
-    # 1. Input
     axes[0].plot(time_axis, Input_plot, color='gray', linewidth=1)
     setup_axis(axes[0], '1. Input Stimulus (Normalized)', 'Contrast')
 
-    # 2. Linear Filter Output (g_t)
     axes[1].plot(time_axis, g_t, color='blue', linewidth=1)
-    setup_axis(axes[1], '2. Linear Filter Output g(t)', 'Filtered Signal')
+    setup_axis(axes[1], '2. Linear Filter Output g(t) [Normalized]', 'Filtered Signal')
 
-    # 3. Nonlinear Output (u_t)
     axes[2].plot(time_axis, u_t, color='green', linewidth=1)
-    setup_axis(axes[2], '3. Nonlinear Output u(t) (Scaled Rate)', 'Rate (u)')
+    setup_axis(axes[2], '3. Nonlinear Output u(t)', 'Rate (u)')
 
-    # 4. Final Response
     axes[3].plot(time_axis, Output_exp, color='black', alpha=0.5, label='Experiment', linewidth=1.5)
     axes[3].plot(time_axis, Prediction, color='red', alpha=0.8, label=f'Model (Corr={corr:.3f})', linewidth=1.5)
-    setup_axis(axes[3], '4. Final Response (Prediction)', 'Response')
+    setup_axis(axes[3], '4. Final Response (A state)', 'Response')
     axes[3].legend(loc='upper right')
 
     plt.tight_layout()
-    plot_path = os.path.join(save_dir, "detailed_analysis.png")
+    plot_path = os.path.join(save_dir, "detailed_analysis_fixed.png")
     plt.savefig(plot_path)
     print(f"詳細グラフを保存しました: {plot_path}")
 
