@@ -213,11 +213,25 @@ def main():
     u_t = u_t[:min_len_eval]
     Input_plot = Input[:min_len_eval]
 
+    # ================= 正規化処理 (追加) =================
+    # Predictionを「平均0, 最大値1」に変換
+    if check == 1 and len(Prediction) > 0:
+        # 1. 平均を引いてゼロセンター化
+        Prediction = Prediction - np.mean(Prediction)
+        
+        # 2. 最大値で割ってスケーリング (Max=1)
+        p_max = np.max(Prediction)
+        if p_max > 1e-9: # ゼロ除算防止
+            Prediction = Prediction / p_max
+            
+        print(f"Prediction Normalized: Mean={np.mean(Prediction):.4f}, Max={np.max(Prediction):.4f}")
+    # ====================================================
+
     if check == 1:
         corr, _ = spearmanr(Output_exp, Prediction)
         print(f"Spearman Correlation: {corr:.6f}")
 
-    # ================= 保存処理 (追加箇所) =================
+    # ================= 保存処理 =================
     save_dir = os.path.join(RESULTS_DIR, "validation")
     os.makedirs(save_dir, exist_ok=True)
 
@@ -226,7 +240,7 @@ def main():
     np.savetxt(os.path.join(save_dir, "u.txt"), u_t, fmt='%.6f')
     np.savetxt(os.path.join(save_dir, "predict.txt"), Prediction, fmt='%.6f')
     print(f"保存完了: {save_dir}/{{g.txt, u.txt, predict.txt}}")
-    # ====================================================
+    # ============================================
 
     # プロット作成 (4段構成)
     total_time = len(Input_plot) * dt

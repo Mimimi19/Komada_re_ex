@@ -256,6 +256,10 @@ class BaccusOptimizer:
             # 先頭の余分な部分をカットし、データ長 t 分だけ取り出す
             # これにより、信号の立ち上がりが t=0 付近に来るように補正されます
             g_t = g_full[shift_idx : shift_idx + t]
+            #追加: g_t の正規化 (論文の Eq 5 に相当する処理)
+            g_std = np.std(g_t)
+            if g_std > 1e-9:
+                g_t = g_t / g_std
             
             # Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
