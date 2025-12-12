@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import fftconvolve
 from scipy.stats import spearmanr
 import glob
+import re
 
 # 日本語フォント対応
 try:
@@ -56,50 +57,70 @@ def load_data(config_path):
     return norm_input, norm_output, dt
 
 def load_params_from_dir(results_dir):
-    """パラメータ読み込み関数"""
+    """パラメータ読み込み関数 (epochファイルを優先)"""
     params = {}
     
     # パラメータ名の順序 (J個のalphasの直後から)
-    # ★ w_gain, w_decay を追加
     keys_order = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
                   'w_gain', 'w_decay',
                   'p_R', 'p_A', 'p_I1', 'p_I2']
     
-    # 1. 個別ファイル (L*.txt) があるかチェック
-    l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
-    
-    if l_files:
-        l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
-        alphas = [float(np.loadtxt(f)) for f in l_files]
-        params['alphas'] = np.array(alphas)
-        params['J'] = len(alphas)
+    # 1. まず epoch_*.txt (まとまったファイル) を探す ★優先順位変更
+    epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
+    if not epoch_files:
+        epoch_files = glob.glob(os.path.join(results_dir, "epoch_*_params.txt"))
         
-        for k in keys_order:
-            p_path = os.path.join(results_dir, f"{k}.txt")
-            if os.path.exists(p_path):
-                params[k] = float(np.loadtxt(p_path))
-            else:
-                params[k] = 0.0 
-        print(f"Loaded from individual files. J={params['J']}")
+    if epoch_files:
+        # 数字部分を抽出してソートし、最新のファイルを取得
+        def extract_epoch_num(path):
+            match = re.search(r'epoch_(\d+)_params', path)
+            return int(match.group(1)) if match else 0
+            
+        latest_file = max(epoch_files, key=extract_epoch_num)
+        print(f"Loading from single file (PRIORITY): {latest_file}")
+        vals = np.loadtxt(latest_file)
         
+        # Jの推定: 全パラメータ数 - スカラーパラメータ数(16)
+        J = len(vals) - 16
+        params['J'] = J
+        params['alphas'] = vals[0:J]
+        
+        for i, k in enumerate(keys_order):
+            val = float(vals[J + i])
+            # kaのゼロ除算対策
+            if k == 'ka' and abs(val) < 1e-9:
+                val = 1.0
+            params[k] = val
+
+    # 2. epochファイルがない場合のみ、個別ファイル (L*.txt) を探す
     else:
-        # 2. まとまったファイルから
-        epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
-        if not epoch_files:
-            epoch_files = glob.glob(os.path.join(results_dir, "epoch_*_params.txt"))
+        l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
+        
+        if l_files:
+            l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
+            alphas = [float(np.loadtxt(f)) for f in l_files]
+            params['alphas'] = np.array(alphas)
+            params['J'] = len(alphas)
             
-        if epoch_files:
-            latest_file = max(epoch_files, key=lambda x: int(os.path.basename(x).split('_')[1]))
-            print(f"Loading from single file: {latest_file}")
-            vals = np.loadtxt(latest_file)
-            
-            # Jの推定: 全パラメータ数 - スカラーパラメータ数(16)
-            J = len(vals) - 16
-            params['J'] = J
-            params['alphas'] = vals[0:J]
-            
-            for i, k in enumerate(keys_order):
-                params[k] = float(vals[J + i])
+            for k in keys_order:
+                p_path = os.path.join(results_dir, f"{k}.txt")
+                if os.path.exists(p_path):
+                    val = float(np.loadtxt(p_path))
+                    if k == 'ka' and abs(val) < 1e-9:
+                        print(f"警告: {k} が 0.0 に近いため 1.0 に補正します。")
+                        val = 1.0
+                    params[k] = val
+                else:
+                    # ファイルがない場合のデフォルト処理
+                    if k == 'ka':
+                        print(f"警告: {k}.txt が見つかりません。1.0 を設定します。")
+                        params[k] = 1.0
+                    elif k == 'kappa':
+                         print(f"警告: {k}.txt が見つかりません。デフォルト値により非線形応答が死ぬ可能性があります。")
+                         params[k] = 1.0 # kappaがない場合も1.0にしておくほうが安全
+                    else:
+                        params[k] = 0.0 
+            print(f"Loaded from individual files. J={params['J']}")
         else:
             print("エラー: パラメータファイルが見つかりません。")
             sys.exit(1)
@@ -135,6 +156,7 @@ def run_prediction(params, Input, dt, tau=1.0):
         g_t = g_t / g_std
 
     # 2. Nonlinear Module
+    # ka が 0 だとここで ZeroDivisionError になる
     u_t = N_LNK.main(
         g_t, 
         params['a'], 
@@ -149,7 +171,7 @@ def run_prediction(params, Input, dt, tau=1.0):
         len(u_t), u_t, dt, 
         R0, A0, I10, I20,
         params['ka'], params['kfi'], params['kfr'], params['ksi'], params['ksr'],
-        params['w_gain'], params['w_decay'], # ★追加
+        params['w_gain'], params['w_decay'],
         label="Validation"
     )
     
@@ -159,7 +181,7 @@ def run_prediction(params, Input, dt, tau=1.0):
 def main():
     # ================= 設定エリア =================
     DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
-    RESULTS_DIR = "scripts/20251212_23" 
+    RESULTS_DIR = "scripts/20251213_03" 
     TAU = 1.0 
     # ============================================
 
@@ -218,10 +240,6 @@ def main():
     
     # 相関計算 (マスク済みデータで計算)
     if check == 1:
-        # 実データ(Output_exp)と予測(masked_pre)の相関
-        # Output_expもマスク範囲を除外して計算するのが厳密だが、
-        # ここではグラフ表示用に全体で計算するか、マスク後で計算するか選択。
-        # BaccusModel.pyと同様にマスク後の部分だけで計算して表示する
         if len(Output_exp) > mask_steps:
              corr, _ = spearmanr(Output_exp[mask_steps:], masked_pre[mask_steps:])
         else:
@@ -235,11 +253,10 @@ def main():
     np.savetxt(os.path.join(save_dir, "g.txt"), g_t, fmt='%.6f')
     np.savetxt(os.path.join(save_dir, "u.txt"), u_t, fmt='%.6f')
     
-    # リクエスト: r.txt には生の出力 (ここでは電流 W_raw) を保存
-    # (もしくは 受容体活性 A が見たければ A を返す必要がありますが、文脈的に W の生データと解釈)
+    # r.txt には生の出力 (電流 W_raw) を保存
     np.savetxt(os.path.join(save_dir, "r.txt"), W_raw, fmt='%.6f')
     
-    # リクエスト: predict.txt には正規化後の予測応答
+    # predict.txt には正規化後の予測応答
     np.savetxt(os.path.join(save_dir, "predict.txt"), Prediction, fmt='%.6f')
     
     np.savetxt(os.path.join(save_dir, "masked_pre.txt"), masked_pre, fmt='%.6f')

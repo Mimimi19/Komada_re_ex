@@ -88,7 +88,7 @@ def main(time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi,
     """
     # flush=Trueで、バッファリングされずにすぐ表示されるようにする
     #end='\r'で描き終わったらカーソルを行頭に戻す
-    print(f"             -                 - Kinetics Model ({label}) is being processed.", end='\r', flush=True)
+    print(f"Kinetics Model ({label}) is being processed.", end='\r', flush=True)
 
     R_state, A_state, I1_state, I2_state, W_state, check, last_idx = _simulation_loop_jit(
         time_steps, u_input, dt, R_start, A_start, I1_start, I2_start, ka, kfi, kfr, ksi, ksr, w_gain, w_decay
