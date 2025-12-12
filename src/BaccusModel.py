@@ -233,34 +233,32 @@ class BaccusOptimizer:
                 p_R, p_A, p_I1, p_I2
             )
             
-            t = min(len(self.Input), len(self.Output))
+            # フィルタの有効長 (tau) に必要なポイント数だけを計算します。
+            filter_points = int(tau / dt) + 1  # +1 は余裕を持たせるため
+            
+            # カーネル生成 (長さは filter_points のみ)
+            linear_filter_kernel, _ = L_LNK.main(alphas, delta, filter_points, dt, tau)
+            
+            #畳み込みとサイズ調整
+            g_full = fftconvolve(self.Input, linear_filter_kernel, mode='full')
+            
+            # フィルタによる位相遅れを補正するためのシフト量
+            # Kernelは L_LNK 内で反転([::-1])されているため、ピーク位置等を考慮して調整します
+            # ここでは単純にフィルタ長分をシフトして「因果的」に合わせます
+            shift_idx = int(tau / dt) 
+            
+            # データ長に合わせて切り出し
+            if len(g_full) > shift_idx + len(self.Input):
+                g_t = g_full[shift_idx : shift_idx + len(self.Input)]
+            else:
+                # 万が一長さが足りない場合のフォールバック（後ろをゼロ埋めなど）
+                g_t = g_full[:len(self.Input)]
 
-            # Linear Filter
-            linear_filter_kernel, _ = L_LNK.main(alphas, delta, t, dt, tau)
-            
-            # --- 修正箇所: mode='full' で畳み込み ---
-            g_full = fftconvolve(self.Input[:t], linear_filter_kernel, mode='full')
-            
-            # --- 修正箇所: シフト量の計算と切り出し ---
-            # linear_filter_kernel は長さ t ですが、実際に値が入っているのは tau の期間だけです。
-            # L_LNKの実装上、kernelは逆転([::-1])して返されており、有効な成分は配列の「末尾」に寄っています。
-            # したがって、先頭の (配列長 - 有効フィルタ長) はゼロパディングによる遅延となります。
-            
-            filter_len = int(tau / dt)  # 実際のフィルタの時間幅に対応するインデックス数
-            shift_idx = len(linear_filter_kernel) - filter_len # 切り捨てるべき先頭の長さ
-            
-            # 安全策: shift_idx が範囲外にならないようにガード
-            if shift_idx < 0: shift_idx = 0
-            if shift_idx >= len(g_full): shift_idx = 0
-            
-            # 先頭の余分な部分をカットし、データ長 t 分だけ取り出す
-            # これにより、信号の立ち上がりが t=0 付近に来るように補正されます
-            g_t = g_full[shift_idx : shift_idx + t]
-            #追加: g_t の正規化 (論文の Eq 5 に相当する処理)
+            # これがないと g_t が ±100 になり、非線形関数が飽和する
             g_std = np.std(g_t)
             if g_std > 1e-9:
                 g_t = g_t / g_std
-            
+                
             # Nonlinear Model
             u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
             
@@ -279,20 +277,35 @@ class BaccusOptimizer:
             # Evaluation
             correlation = 1.0  # ペナルティ値
             if check == 1:
-                # モデル出力の長さに合わせて正解データをスライスして比較
+                # 1. まずデータ長を合わせる
                 current_len = len(A_state)
                 output_aligned = self.Output[:current_len]
-                
-                # 万が一長さが合わない場合の安全策
-                if len(output_aligned) != len(A_state):
-                     min_l = min(len(output_aligned), len(A_state))
-                     output_aligned = output_aligned[:min_l]
-                     keep_post = A_state[:min_l]
-                else:
-                     keep_post = A_state
+                model_aligned = A_state  # A_stateはマスク前の生データを使う
 
-                corr_val, _ = spearmanr(output_aligned, keep_post)
-                correlation = -1 * corr_val  # 最小化のため
+                # 2. 万が一長さが合わない場合の安全策
+                if len(output_aligned) != len(model_aligned):
+                     min_l = min(len(output_aligned), len(model_aligned))
+                     output_aligned = output_aligned[:min_l]
+                     model_aligned = model_aligned[:min_l]
+
+                # 3. マスク処理: 最初の 1秒スライスして捨てる、Aの初期値依存部分を評価から除外
+                mask_seconds = 1.0  # または 2.0
+                mask_idx = int(mask_seconds / dt)
+
+                if mask_idx < len(output_aligned):
+                    # スライスしたデータ同士で相関を計算
+                    # これにより初期値依存の不安定な部分を完全に無視できる
+                    output_eval = output_aligned[mask_idx:]
+                    model_eval = model_aligned[mask_idx:]
+                    
+                    # 標準偏差チェック（平坦な線になっていないか）
+                    if np.std(model_eval) > 1e-9 and np.std(output_eval) > 1e-9:
+                        corr_val, _ = spearmanr(output_eval, model_eval)
+                        correlation = -1 * corr_val
+                    else:
+                        correlation = 0.0 # 平坦ならスコアなし
+                else:
+                    correlation = 1.0 
             else:
                 self.failed_lnk_model_runs += 1
             
