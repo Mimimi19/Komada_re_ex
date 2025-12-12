@@ -12,3 +12,4 @@ mlflow
 python-dotenv
 numba
 requests
+japanize-matplotlib
