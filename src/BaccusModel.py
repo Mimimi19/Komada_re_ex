@@ -95,7 +95,7 @@ class BaccusOptimizer:
         if not self.use_I2:
             print("--- 警告: use_I2 = False ---")
         else:
-            print("\nI2 state (p_I2, ksi, ksr) は最適化対象に含まれます。\n")
+            print("\nI2 state (ksi, ksr) は最適化対象に含まれます。\n") # p_I2削除に伴いメッセージ修正
 
         # 入力データの正規化
         raw_input = np.genfromtxt(input_path)
@@ -160,23 +160,51 @@ class BaccusOptimizer:
         os.makedirs(self.results_dir, exist_ok=True)
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
 
-    def _normalize_states(self, p_R, p_A, p_I1, p_I2):
+    def _calculate_steady_state(self, a, kappa, b1, b2, ka, kfi, kfr, ksi, ksr):
         """
-        初期占有率の比率を正規化し、合計1.0のタプルを返すヘルパー関数。
+        動的モデルの初期値を定常状態から計算します。
         """
-        # use_I2: false の場合、p_I2 は 0.0 が渡される想定
-        total = p_R + p_A + p_I1 + p_I2
-        if total > 1e-9:
-            return p_R/total, p_A/total, p_I1/total, p_I2/total
+        # 定常入力 u_steady の計算 (入力=0 のときの非線形応答)
+        # N_LNK.main は配列を返すので [0] を取得
+        u_steady = N_LNK.main(np.array([0.0]), a, kappa, b1, b2, ka)[0]
+        # 負の値にならないよう安全策（通常 erfc は正ですがパラメータ次第で念のため）
+        u_steady = max(0.0, u_steady)
+
+        # 定常状態の代数的計算
+        # R を基準(1.0)として、他の状態の相対比を計算
+        # 平衡式:
+        #  ka * R * u = kfi * A  => A = (ka * u / kfi) * R
+        #  ka * R * u = kfr * I1 => I1 = (ka * u / kfr) * R
+        #  dI2 = ksi*I1 - ksr*I2*u = 0 => I2 = (ksi * I1) / (ksr * u)
+
+        if kfi > 1e-9:
+            A_ratio = (ka * u_steady) / kfi
         else:
-            # オプティマイザが全て0を提案した場合のフォールバック
-            # (この試行はペナルティ(相関1.0)を受ける)
-            return 1.0, 0.0, 0.0, 0.0
+            A_ratio = 0.0
+            
+        if kfr > 1e-9:
+            I1_ratio = (ka * u_steady) / kfr
+        else:
+            I1_ratio = 0.0
+
+        if self.use_I2 and kfr > 1e-9 and ksr > 1e-9:
+             # I2 = (ksi * I1) / (ksr * u) 
+             # I1 を代入すると u が約分され: I2 = (ksi * ka) / (kfr * ksr) * R
+             # これにより u_steady が非常に小さい場合でも計算可能
+            I2_ratio = (ksi * ka) / (kfr * ksr)
+        else:
+            I2_ratio = 0.0
+
+        # 合計が1になるように正規化
+        total = 1.0 + A_ratio + I1_ratio + I2_ratio
+        
+        # それぞれの確率（占有率）を返す
+        return (1.0/total), (A_ratio/total), (I1_ratio/total), (I2_ratio/total)
 
     def lnk_model(self, x, save_states=False):
         """
         目的関数。与えられたパラメータxでモデルを評価します。
-        mode='full' に変更して因果性を明確にし、初期の余分な部分をカットします。
+        初期値は定常状態計算により自動設定されます。
         """
         self.total_lnk_model_runs += 1
         try:
@@ -202,19 +230,17 @@ class BaccusOptimizer:
             w_gain = x[J+10]
             w_decay = x[J+11]
             
-            # 各占有率の初期値
-            p_R = x[J+12]
-            p_A = x[J+13]
-            p_I1 = x[J+14]
-            p_I2 = x[J+15]
+            # ※ ここで p_R, p_A 等の初期値パラメータのアンパッキングは削除されました
             
             if not self.use_I2:
                 ksi_kinetic = 0.0
                 ksr_kinetic = 0.0
-                p_I2 = 0.0
 
-            R_start, A_start, I1_start, I2_start = self._normalize_states(
-                p_R, p_A, p_I1, p_I2
+            # --- 定常状態を計算して初期値とする ---
+            # これにより「平均的な明るさ」に順応した状態からスタートできる
+            R_start, A_start, I1_start, I2_start = self._calculate_steady_state(
+                a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear,
+                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic
             )
             
             # フィルタの有効長 (tau) に必要なポイント数だけを計算します。
@@ -227,8 +253,6 @@ class BaccusOptimizer:
             g_full = fftconvolve(self.Input, linear_filter_kernel, mode='full')
             
             # フィルタによる位相遅れを補正するためのシフト量
-            # Kernelは L_LNK 内で反転([::-1])されているため、ピーク位置等を考慮して調整します
-            # ここでは単純にフィルタ長分をシフトして「因果的」に合わせます
             shift_idx = int(tau / dt) 
             
             # データ長に合わせて切り出し
@@ -247,11 +271,11 @@ class BaccusOptimizer:
             u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
             # 飽和ペナルティ 
             # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
-            # ここでは簡単に「u_tの分散が小さすぎる場合」を検知
-            if np.std(u_t) < 1e-6:  # 閾値は調整が必要
+            if np.std(u_t) < 1e-6:  # 閾値は以前より緩和
                 print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
                 return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
-            # Kinetic Model
+            
+            # Kinetic Model 
             R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, 
@@ -279,13 +303,13 @@ class BaccusOptimizer:
                      output_aligned = output_aligned[:min_l]
                      model_aligned = model_aligned[:min_l]
 
-                # 3. マスク処理: 最初の 1秒スライスして捨てる、Aの初期値依存部分を評価から除外
+                # マスク処理: 
+                # 定常状態からのスタートにより過渡応答は減るが、フィルタの遅延分などを考慮してマスクは残す
                 mask_seconds = 1.0 
                 mask_idx = int(mask_seconds / dt)
 
                 if mask_idx < len(output_aligned):
                     # スライスしたデータ同士で相関を計算
-                    # これにより初期値依存の不安定な部分を完全に無視できる
                     output_eval = output_aligned[mask_idx:]
                     model_eval = model_aligned[mask_idx:]
                     
@@ -334,8 +358,20 @@ class BaccusOptimizer:
             **{f'L{i+1}': xk[i] for i in range(self.J)},
             'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
             'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
-            'w_gain': xk[self.J+10], 'w_decay': xk[self.J+11], 'p_R': xk[self.J+12], 'p_A': xk[self.J+13], 'p_I1': xk[self.J+14], 'p_I2': xk[self.J+15]
+            'w_gain': xk[self.J+10], 'w_decay': xk[self.J+11]
+            # p_R, p_A 等はここには含まれない
         }
+
+        # 定常状態として計算された初期値をログ用に計算
+        r_calc, a_calc, i1_calc, i2_calc = self._calculate_steady_state(
+            intermediate_params['a'], intermediate_params['kappa'], intermediate_params['b1'], intermediate_params['b2'],
+            intermediate_params['ka'], intermediate_params['kfi'], intermediate_params['kfr'], 
+            intermediate_params['ksi'], intermediate_params['ksr']
+        )
+        intermediate_params['p_R_calc'] = r_calc
+        intermediate_params['p_A_calc'] = a_calc
+        intermediate_params['p_I1_calc'] = i1_calc
+        intermediate_params['p_I2_calc'] = i2_calc
         
         # mlflow.log_metrics を使って辞書の中身を一度に記録
         # keyの先頭に "epoch_" をつけて、最終結果(optimal_)と区別する
@@ -367,11 +403,11 @@ class BaccusOptimizer:
             
             # Scalar Parameters
             # 配列のインデックスを順番に進めていくため、記述ミスによるズレを防げます
+            # 初期値パラメータはリストから除外
             param_keys = [
                 'delta', 'a', 'kappa', 'b1', 'b2', 
                 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-                'w_gain', 'w_decay', # Added
-                'p_R', 'p_A', 'p_I1', 'p_I2'
+                'w_gain', 'w_decay'
             ]
             
             for key in param_keys:
@@ -381,21 +417,17 @@ class BaccusOptimizer:
             # 相関係数もマップに追加
             param_map['correlation'] = optimal_correlation
 
-            # --- 正規化された初期状態の計算 ---
-            # use_I2フラグを考慮して正規化計算を行う
-            p_R_opt = param_map['p_R']
-            p_A_opt = param_map['p_A']
-            p_I1_opt = param_map['p_I1']
-            p_I2_opt = param_map['p_I2'] if self.use_I2 else 0.0
-
-            R_start_opt, A_start_opt, I1_start_opt, I2_start_opt = self._normalize_states(
-                p_R_opt, p_A_opt, p_I1_opt, p_I2_opt
+            # --- 計算された定常状態（初期状態）の保存 ---
+            R_calc, A_calc, I1_calc, I2_calc = self._calculate_steady_state(
+                param_map['a'], param_map['kappa'], param_map['b1'], param_map['b2'],
+                param_map['ka'], param_map['kfi'], param_map['kfr'], 
+                param_map['ksi'], param_map['ksr']
             )
 
-            param_map['R_start_normalized'] = R_start_opt
-            param_map['A_start_normalized'] = A_start_opt
-            param_map['I1_start_normalized'] = I1_start_opt
-            param_map['I2_start_normalized'] = I2_start_opt
+            param_map['R_start_calculated'] = R_calc
+            param_map['A_start_calculated'] = A_calc
+            param_map['I1_start_calculated'] = I1_calc
+            param_map['I2_start_calculated'] = I2_calc
 
             # ---ファイル保存ループ (エラーハンドリング付き) ---
             saved_count = 0
@@ -422,7 +454,7 @@ class BaccusOptimizer:
             save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
             save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
             save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
-            save_results(W_state, os.path.join(state_dir, 'W_state.txt')) # Added
+            save_results(W_state, os.path.join(state_dir, 'W_state.txt'))
             
             print("すべての保存処理が完了しました。")
             
@@ -436,8 +468,8 @@ class BaccusOptimizer:
         # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
         print("Numba JITコンパイラのウォームアップ中...")
         try:
-            # ダミーのパラメータ配列 (長さ: J + 16) を作成
-            x_dummy = np.ones(self.J + 16) 
+            # ダミーのパラメータ配列 (長さ: J + 12) を作成
+            x_dummy = np.ones(self.J + 12) 
             # 目的関数を一度だけ実行して、コンパイルを強制する
             self.lnk_model(x_dummy, save_states=False)
             print("ウォームアップ完了。最適化を開始します。")
@@ -469,11 +501,7 @@ class BaccusOptimizer:
                 # ★ 追加されたパラメータの範囲
                 tuple(pb.Kinetics.w_gain),
                 tuple(pb.Kinetics.w_decay),
-                # 初期状態
-                tuple(pb.InitialStates.p_R),
-                tuple(pb.InitialStates.p_A),
-                tuple(pb.InitialStates.p_I1),
-                tuple(pb.InitialStates.p_I2)
+                # 初期状態 p_R, p_A, p_I1, p_I2 は削除
             ])
         except Exception as e:
             print(f"Config Error: {e}")
@@ -482,15 +510,15 @@ class BaccusOptimizer:
         
         #use_I2=False の場合、探索範囲を [0, 0] に固定
         if not self.use_I2:
-            print("I2が無効なため、ksi, ksr, p_I2 の探索範囲を [0.0, 0.0] に固定します。")
+            print("I2が無効なため、ksi, ksr の探索範囲を [0.0, 0.0] に固定します。")
             # インデックスもずれるので注意: ksrは J+9
             try_bounds[J + 8] = (0.0, 0.0) # ksi
             try_bounds[J + 9] = (0.0, 0.0) # ksr
-            try_bounds[J + 15] = (0.0, 0.0) # p_I2
+            # p_I2 の固定処理は不要になりました
 
         param_names = [f'L{i+1}' for i in range(self.J)] + [
             'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-            'w_gain', 'w_decay', 'p_R', 'p_A', 'p_I1', 'p_I2'
+            'w_gain', 'w_decay' # p_R, p_A... 削除
         ]
 
         #MLflowに記録するための辞書を作成
