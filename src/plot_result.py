@@ -60,12 +60,16 @@ def load_params_from_dir(results_dir):
     """パラメータ読み込み関数 (epochファイルを優先)"""
     params = {}
     
-    # パラメータ名の順序 (J個のalphasの直後から)
-    keys_order = ['delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
-                  'w_gain', 'w_decay',
-                  'p_R', 'p_A', 'p_I1', 'p_I2']
+    # BaccusModel.py の変更に合わせて、初期値パラメータ(p_R等)を削除
+    # J個のalphasの後に続くスカラーパラメータのリスト
+    keys_order = [
+        'delta', 'a', 'kappa', 'b1', 'b2', 
+        'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
+        'w_gain', 'w_decay'
+    ]
+    num_scalar_params = len(keys_order) # 12個
     
-    # 1. まず epoch_*.txt (まとまったファイル) を探す ★優先順位変更
+    # 1. まず epoch_*.txt (まとまったファイル) を探す
     epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
     if not epoch_files:
         epoch_files = glob.glob(os.path.join(results_dir, "epoch_*_params.txt"))
@@ -80,8 +84,12 @@ def load_params_from_dir(results_dir):
         print(f"Loading from single file (PRIORITY): {latest_file}")
         vals = np.loadtxt(latest_file)
         
-        # Jの推定: 全パラメータ数 - スカラーパラメータ数(16)
-        J = len(vals) - 16
+        # Jの推定: 全パラメータ数 - スカラーパラメータ数
+        if len(vals) < num_scalar_params:
+             print("エラー: パラメータファイルが短すぎます。")
+             sys.exit(1)
+             
+        J = len(vals) - num_scalar_params
         params['J'] = J
         params['alphas'] = vals[0:J]
         
@@ -111,13 +119,10 @@ def load_params_from_dir(results_dir):
                         val = 1.0
                     params[k] = val
                 else:
-                    # ファイルがない場合のデフォルト処理
                     if k == 'ka':
-                        print(f"警告: {k}.txt が見つかりません。1.0 を設定します。")
                         params[k] = 1.0
                     elif k == 'kappa':
-                         print(f"警告: {k}.txt が見つかりません。デフォルト値により非線形応答が死ぬ可能性があります。")
-                         params[k] = 1.0 # kappaがない場合も1.0にしておくほうが安全
+                         params[k] = 1.0
                     else:
                         params[k] = 0.0 
             print(f"Loaded from individual files. J={params['J']}")
@@ -127,17 +132,55 @@ def load_params_from_dir(results_dir):
 
     return params
 
-def normalize_states(p_R, p_A, p_I1, p_I2):
-    total = p_R + p_A + p_I1 + p_I2
-    if total > 1e-9:
-        return p_R/total, p_A/total, p_I1/total, p_I2/total
-    return 1.0, 0.0, 0.0, 0.0
+def calculate_steady_state(params):
+    """
+    パラメータから平均入力に対する定常状態(R, A, I1, I2)を計算する。
+    BaccusModel.py の _calculate_steady_state と同じロジック。
+    """
+    a = params['a']
+    kappa = params['kappa']
+    b1 = params['b1']
+    b2 = params['b2']
+    ka = params['ka']
+    kfi = params['kfi']
+    kfr = params['kfr']
+    ksi = params['ksi']
+    ksr = params['ksr']
+
+    # 1. 定常入力 u_steady の計算 (入力=0 のときの非線形応答)
+    # N_LNK.main は配列を返すので [0] を取得
+    u_steady = N_LNK.main(np.array([0.0]), a, kappa, b1, b2, ka)[0]
+    u_steady = max(0.0, u_steady)
+
+    # 2. 定常状態の代数的計算
+    if kfi > 1e-9:
+        A_ratio = (ka * u_steady) / kfi
+    else:
+        A_ratio = 0.0
+        
+    if kfr > 1e-9:
+        I1_ratio = (ka * u_steady) / kfr
+    else:
+        I1_ratio = 0.0
+
+    if kfr > 1e-9 and ksr > 1e-9:
+         # I2への分岐がある場合 (use_I2=True前提で計算)
+         # I2 = (ksi * I1) / (ksr * u) -> I2 = (ksi * ka) / (kfr * ksr)
+        I2_ratio = (ksi * ka) / (kfr * ksr)
+    else:
+        I2_ratio = 0.0
+
+    # 3. 合計が1になるように正規化
+    total = 1.0 + A_ratio + I1_ratio + I2_ratio
+    
+    return (1.0/total), (A_ratio/total), (I1_ratio/total), (I2_ratio/total)
 
 def run_prediction(params, Input, dt, tau=1.0):
     """
     モデルを実行し、g_t, u_t, W (電流) を返す
     """
-    R0, A0, I10, I20 = normalize_states(params['p_R'], params['p_A'], params['p_I1'], params['p_I2'])
+    # 初期状態をパラメータから計算
+    R0, A0, I10, I20 = calculate_steady_state(params)
     
     # 1. Linear Filter
     filter_points = int(tau / dt) + 1
@@ -156,7 +199,6 @@ def run_prediction(params, Input, dt, tau=1.0):
         g_t = g_t / g_std
 
     # 2. Nonlinear Module
-    # ka が 0 だとここで ZeroDivisionError になる
     u_t = N_LNK.main(
         g_t, 
         params['a'], 
@@ -166,7 +208,7 @@ def run_prediction(params, Input, dt, tau=1.0):
         params['ka']
     )
     
-    # 3. Kinetic Model (6つの戻り値を受け取る)
+    # 3. Kinetic Model
     R, A, I1, I2, W, check = K_LNK.main(
         len(u_t), u_t, dt, 
         R0, A0, I10, I20,
@@ -175,25 +217,23 @@ def run_prediction(params, Input, dt, tau=1.0):
         label="Validation"
     )
     
-    # W (Current) を予測値として返す
     return g_t, u_t, W, check
 
-def main():
-    # ================= 設定エリア =================
-    DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"
-    RESULTS_DIR = "scripts/20251213_03" 
-    TAU = 1.0 
-    # ============================================
-
-    if len(sys.argv) > 1:
-        RESULTS_DIR = sys.argv[1]
-    
-    if not os.path.exists(RESULTS_DIR):
-        print(f"エラー: ディレクトリが見つかりません: {RESULTS_DIR}")
+def main(data_config_path, results_dir, tau=1.0):
+    if not os.path.exists(results_dir):
+        print(f"エラー: ディレクトリが見つかりません: {results_dir}")
         return
 
-    Input, Output_exp, dt = load_data(DATA_CONFIG_PATH)
-    params = load_params_from_dir(RESULTS_DIR)
+    # データロード
+    Input, Output_exp, dt = load_data(data_config_path)
+    
+    # パラメータロード
+    print(f"Loading parameters from {results_dir}...")
+    try:
+        params = load_params_from_dir(results_dir)
+    except Exception as e:
+        print(f"パラメータ読み込みエラー: {e}")
+        return
 
     min_len = min(len(Input), len(Output_exp))
     Input = Input[:min_len]
@@ -201,7 +241,7 @@ def main():
 
     print("Running model prediction...")
     # W_raw (生の電流値) を受け取る
-    g_t, u_t, W_raw, check = run_prediction(params, Input, dt, tau=TAU)
+    g_t, u_t, W_raw, check = run_prediction(params, Input, dt, tau=tau)
     
     if check != 1:
         print("Kineticモデル計算失敗。")
@@ -229,7 +269,7 @@ def main():
 
     # 2. masked_pre.txt (マスク済み)
     masked_pre = Prediction.copy()
-    mask_steps = int(1.0 / dt)
+    mask_steps = int(1.0 / dt) # 1秒マスク
     if mask_steps > len(masked_pre): mask_steps = len(masked_pre)
 
     if len(masked_pre) > mask_steps:
@@ -245,9 +285,11 @@ def main():
         else:
              corr, _ = spearmanr(Output_exp, masked_pre)
         print(f"Spearman Correlation (Masked): {corr:.6f}")
+    else:
+        corr = 0.0
 
     # 保存
-    save_dir = os.path.join(RESULTS_DIR, "validation")
+    save_dir = os.path.join(results_dir, "validation")
     os.makedirs(save_dir, exist_ok=True)
     
     np.savetxt(os.path.join(save_dir, "g.txt"), g_t, fmt='%.6f')
@@ -296,4 +338,36 @@ def main():
     print("グラフ保存完了")
 
 if __name__ == "__main__":
-    main()
+    # =================================================================
+    # ▼▼▼ ここに使用するデータと結果フォルダの詳細を入力してください ▼▼▼
+    # =================================================================
+    
+    # 1. データ設定ファイル (.yaml) のパス
+    # TARGET_CONFIG = "config/data/Ucb1.yaml"
+    # TARGET_CONFIG = "config/data/Ucb2.yaml"
+    TARGET_CONFIG = "config/data/ret2p-1.yaml"
+    
+    # 2. 学習結果が保存されているディレクトリ
+    # TARGET_DIR = "scripts/cb1/20251217_00"
+    # TARGET_DIR = "scripts/cb2/20251213_02"
+    TARGET_DIR = "scripts/ret2p/20251217_00"
+    
+    # 3. 時定数 (Tau)
+    TARGET_TAU = 1.0
+
+    # =================================================================
+    
+    # コマンドライン引数がある場合はそちらを優先
+    if len(sys.argv) > 1:
+        TARGET_DIR = sys.argv[1]
+    if len(sys.argv) > 2:
+        TARGET_CONFIG = sys.argv[2]
+
+    print(f"--- 実行設定 ---")
+    print(f"Config : {TARGET_CONFIG}")
+    print(f"Results: {TARGET_DIR}")
+    print(f"Tau    : {TARGET_TAU}")
+    print(f"---------------")
+
+    # main関数に設定を渡して実行
+    main(TARGET_CONFIG, TARGET_DIR, TARGET_TAU)
