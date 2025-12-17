@@ -1,5 +1,6 @@
-# BaccusModel.py
+# src/model/BaccusModel.py
 # -*- coding: utf-8 -*-
+import sys
 import os
 import time
 import pprint
@@ -13,6 +14,15 @@ from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
 import requests
 from dotenv import load_dotenv
+
+# import sys と import os の直後に配置
+current_dir = os.path.dirname(os.path.abspath(__file__)) # src/model
+src_dir = os.path.dirname(current_dir) # src
+
+# srcディレクトリをパスに追加して components を読み込めるようにする
+if src_dir not in sys.path:
+    sys.path.append(src_dir)
+
 import components.L_LNK as L_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
@@ -637,7 +647,7 @@ class BaccusOptimizer:
             # 失敗した場合でも、最終的な相関係数だけは記録しておく
             mlflow.log_metric("final_correlation_on_failure", optimal_correlation)
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(cfg: DictConfig):
     """
     Hydraによって呼び出されるメイン関数。

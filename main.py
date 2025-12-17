@@ -1,6 +1,149 @@
-def main():
-    print("Hello from re-experiment!")
+# main.py
+import os
+import sys
+import datetime
+import numpy as np
+import hydra
+from omegaconf import DictConfig
+import subprocess
+from pathlib import Path
 
+# コンポーネントへのパスを通す
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# src/components/segment_manager.py をインポート
+from components.segment_manager import SegmentManager
+# src/plot_result.py をインポート
+import plot_result
+
+@hydra.main(config_path="config", config_name="config", version_base=None)
+def main(cfg: DictConfig):
+    print("=== Baccus Model Orchestrator Started ===")
+    
+    project_root = hydra.utils.get_original_cwd()
+    data_name = cfg.data.name
+    dt = cfg.data.get('dt', 0.0002) # configにない場合はデフォルト値
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    
+    # データの読み込み
+    input_file_path = Path(project_root) / cfg.data.input_file
+    output_file_path = Path(project_root) / cfg.data.output_file
+    
+    print(f"Loading Data: {input_file_path}")
+    raw_input = np.genfromtxt(input_file_path)
+    raw_output = np.genfromtxt(output_file_path)
+
+    # segment指定の取得 (config.yamlに追加したため cfg.segment でアクセス可能)
+    segment_duration = cfg.get("segment")
+
+    # === MODE A: 全文処理 (Segment指定なし) ===
+    if segment_duration is None:
+        print("\n[Mode: Full Data Processing]")
+        
+        save_dir = Path(project_root) / "scripts" / "results" / data_name / timestamp
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [
+            "uv", "run", "python", "src/model/BaccusModel.py",
+            f"data.input_file={input_file_path}",
+            f"data.output_file={output_file_path}",
+            f"hydra.run.dir={save_dir}",
+        ]
+        
+        try:
+            print(f"Running full optimization... Output: {save_dir}")
+            subprocess.run(cmd, check=True, cwd=project_root)
+            
+            # プロット作成
+            result_config = save_dir / ".hydra" / "config.yaml"
+            if result_config.exists():
+                plot_result.process_plot(str(result_config), str(save_dir))
+        except subprocess.CalledProcessError as e:
+            print(f"Execution failed: {e}")
+
+    # === MODE B: セグメント処理 (Segment指定あり) ===
+    else:
+        segment_sec = float(segment_duration)
+        print(f"\n[Mode: Segment Processing] Duration = {segment_sec} sec")
+        
+        base_save_dir = Path(project_root) / "scripts" / "segments" / data_name / timestamp
+        base_save_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = base_save_dir / "temp_files"
+        temp_dir.mkdir(exist_ok=True)
+
+        # Warm-up長の設定 (時定数 tau 程度が目安)
+        warmup_sec = cfg.hyper_params.tau
+        
+        # コンポーネントを使用して分割
+        manager = SegmentManager(project_root, dt)
+        segments = manager.create_segments(raw_input, raw_output, segment_sec, warmup_sec, temp_dir)
+        
+        collected_params = []
+
+        for seg in segments:
+            seg_id = seg['id']
+            trim_sec = seg['trim_sec']
+            print(f"\n--- Processing Segment {seg_id}/{len(segments)} ---")
+            print(f"{seg['info']}")
+            
+            seg_run_dir = base_save_dir / f"{seg_id}_segment"
+            
+            # BaccusModel 実行
+            # trim_I_seconds を渡して、Warm-up区間を評価から除外する
+            cmd = [
+                "uv", "run", "python", "src/model/BaccusModel.py",
+                f"data.input_file={seg['input_path']}",
+                f"data.output_file={seg['output_path']}",
+                f"hydra.run.dir={seg_run_dir}",
+                f"hyper_params.trim_I_seconds={trim_sec}",
+                # 高速化設定
+                "optimization.popsize=15",
+                "optimization.maxiter=50"
+            ]
+            
+            try:
+                subprocess.run(cmd, check=True, cwd=project_root)
+                
+                params_file = seg_run_dir / "params.txt"
+                if params_file.exists():
+                    params = np.genfromtxt(params_file)
+                    collected_params.append(params)
+                    
+                    # プロット
+                    result_config = seg_run_dir / ".hydra" / "config.yaml"
+                    plot_result.process_plot(str(result_config), str(seg_run_dir))
+            except subprocess.CalledProcessError:
+                print(f"Skipping segment {seg_id} due to error.")
+                continue
+
+        # 中央値計算と全体検証
+        if collected_params:
+            print("\n--- Calculating Median Parameters ---")
+            median_params = np.median(collected_params, axis=0)
+            median_save_path = base_save_dir / "median_params.txt"
+            np.savetxt(median_save_path, median_params)
+            
+            print("--- Running Final Verification with Full Data ---")
+            final_run_dir = base_save_dir / "final_verification"
+            
+            # 中央値検証用ラン (パラメータを渡す仕組みがないため、全データで1回回す)
+            # 本来は median_params を初期値にすべきだが、現状のBaccusModel仕様に合わせて実行
+            cmd_final = [
+                "uv", "run", "python", "src/model/BaccusModel.py",
+                f"data.input_file={input_file_path}",
+                f"data.output_file={output_file_path}",
+                f"hydra.run.dir={final_run_dir}",
+                # ここで median_params を渡す仕組みを実装するか、
+                # あるいは BaccusModel側で params.txt があればそれを初期値にする改造が必要
+            ]
+            subprocess.run(cmd_final, check=True, cwd=project_root)
+            
+            result_config_final = final_run_dir / ".hydra" / "config.yaml"
+            if result_config_final.exists():
+                plot_result.process_plot(str(result_config_final), str(final_run_dir))
+            
+            print(f"\nAll Completed. Results: {base_save_dir}")
+        else:
+            print("No parameters collected.")
 
 if __name__ == "__main__":
     main()

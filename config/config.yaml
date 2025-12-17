@@ -5,6 +5,7 @@ defaults:
 
   - _self_
 
+segment: null # セグメント名 (null の場合、全データを使用, int 型でセグメントの秒数を指定)
 
 # ハイパーパラメータの設定
 hyper_params:
