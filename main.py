@@ -7,7 +7,7 @@ import hydra
 from omegaconf import DictConfig
 import subprocess
 from pathlib import Path
-import shutil  # ファイル操作用に追加
+import shutil
 
 # コンポーネントへのパスを通す
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
@@ -25,6 +25,10 @@ def main(cfg: DictConfig):
     dt = cfg.data.get('dt', 0.0002) 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     
+    # 目的関数のタイプを取得 (configから)
+    objective_type = cfg.hyper_params.get("objective_type", "hybrid")
+    print(f"Objective Type: {objective_type}")
+
     # データの読み込み
     input_file_path = Path(project_root) / cfg.data.input_file
     output_file_path = Path(project_root) / cfg.data.output_file
@@ -43,11 +47,13 @@ def main(cfg: DictConfig):
         save_dir = Path(project_root) / "scripts" / "results" / data_name / timestamp
         save_dir.mkdir(parents=True, exist_ok=True)
         
+        # BaccusModelに渡す引数を構築
         cmd = [
             "uv", "run", "python", "src/model/BaccusModel.py",
             f"data.input_file={input_file_path}",
             f"data.output_file={output_file_path}",
             f"hydra.run.dir={save_dir}",
+            f"hyper_params.objective_type={objective_type}" # 目的関数を渡す
         ]
         
         try:
@@ -92,6 +98,7 @@ def main(cfg: DictConfig):
                 f"data.output_file={seg['output_path']}",
                 f"hydra.run.dir={seg_run_dir}",
                 f"hyper_params.trim_I_seconds={trim_sec}",
+                f"hyper_params.objective_type={objective_type}", # 目的関数を渡す
                 "optimization.popsize=15",
                 "optimization.maxiter=50"
             ]
@@ -104,22 +111,21 @@ def main(cfg: DictConfig):
                     params = np.genfromtxt(params_file)
                     collected_params.append(params)
                     
-                    # --- 追加機能: 解析用ファイルの保存 ---
-                    # ユーザー指定: "最終エポックの各パラメータと使った範囲の刺激を切り出して保存"
-                    
+                    # --- 解析用ファイルの保存 ---
                     # 1. 使用した刺激と応答 (Warmup含む実際にモデルに入力された範囲)
                     shutil.copy(seg['input_path'], seg_run_dir / f"{seg_id}_stimulus.txt")
                     shutil.copy(seg['output_path'], seg_run_dir / f"{seg_id}_response.txt")
                     
-                    # 2. 最終パラメータ (params.txt を {id}_params.txt として複製)
+                    # 2. 最終パラメータの複製
+                    # formatは 'epoch_600_params.txt' と同じく、数値が1列に並んだテキストファイルです
                     shutil.copy(params_file, seg_run_dir / f"{seg_id}_params.txt")
                     
-                    # 3. 予測結果 (predict.txt を {id}_predict.txt として複製)
+                    # 3. 予測結果
                     predict_file = seg_run_dir / "predict.txt"
                     if predict_file.exists():
                         shutil.copy(predict_file, seg_run_dir / f"{seg_id}_predict.txt")
 
-                    print(f"Saved analysis files: {seg_id}_stimulus.txt, {seg_id}_response.txt, etc.")
+                    print(f"Saved: {seg_id}_params.txt, {seg_id}_stimulus.txt, etc.")
 
                     # プロット
                     result_config = seg_run_dir / ".hydra" / "config.yaml"
@@ -134,7 +140,7 @@ def main(cfg: DictConfig):
             print("\n--- Calculating Median Parameters ---")
             median_params = np.median(collected_params, axis=0)
             median_save_path = base_save_dir / "median_params.txt"
-            np.savetxt(median_save_path, median_params)
+            np.savetxt(median_save_path, median_params, fmt='%.6f') # フォーマット指定
             
             print("--- Running Final Verification with Full Data ---")
             final_run_dir = base_save_dir / "final_verification"
@@ -144,6 +150,7 @@ def main(cfg: DictConfig):
                 f"data.input_file={input_file_path}",
                 f"data.output_file={output_file_path}",
                 f"hydra.run.dir={final_run_dir}",
+                f"hyper_params.objective_type={objective_type}"
             ]
             subprocess.run(cmd_final, check=True, cwd=project_root)
             
