@@ -13,6 +13,9 @@ hyper_params:
   # データごとの dt を使用するため、/data/ 以下の YAML ファイルで指定
   # dt: 0.0002 # 1/5000 s
 
+  # 選択肢: spearman, hybrid.
+  objective_type: "hybrid"  
+
   #使用データのトリミング秒数
   trim_I_seconds: 0.0 # s
   trim_O_seconds: 0.0 # s
