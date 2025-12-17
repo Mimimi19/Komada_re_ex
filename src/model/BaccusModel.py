@@ -290,7 +290,10 @@ class BaccusOptimizer:
             # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
             if np.std(u_t) < 1e-6:  # 閾値は以前より緩和
                 print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
-                return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
+                penalty_val = 10.0 # ペナルティを強化 (1.0 -> 10.0)
+                if save_states:
+                    return penalty_val, None, None, None, None, None
+                return penalty_val
             
             # Kinetic Model 
             R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
