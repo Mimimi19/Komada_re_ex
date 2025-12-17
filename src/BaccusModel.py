@@ -1,10 +1,9 @@
-# BaccusModel.py
+# src/model/BaccusModel.py
 # -*- coding: utf-8 -*-
 import os
 import time
 import pprint
 import numpy as np
-from scipy.stats import spearmanr
 from scipy.optimize import differential_evolution, minimize
 from scipy.signal import fftconvolve
 from tqdm import tqdm
@@ -14,9 +13,15 @@ from hydra.utils import get_original_cwd, to_absolute_path
 import mlflow
 import requests
 from dotenv import load_dotenv
-import components.L_LNK as L_LNK
-import components.N_LNK as N_LNK
-import components.K_baccus as K_LNK
+
+# コンポーネントのインポート
+import src.components.L_LNK as L_LNK
+import src.components.N_LNK as N_LNK
+import src.components.K_baccus as K_LNK
+
+# 目的関数モジュールのインポート (新規追加)
+import src.components.objectives.spearman as obj_spearman
+import src.components.objectives.hybrid as obj_hybrid
 
 def save_results(data, filepath):
     """
@@ -69,6 +74,10 @@ class BaccusOptimizer:
         self.cfg = cfg
         # I2を使用するかどうかのフラグ
         self.use_I2 = self.cfg.hyper_params.get('use_I2', True)
+        
+        # 目的関数のタイプを取得 (デフォルトは spearman)
+        self.objective_type = self.cfg.hyper_params.get('objective_type', 'spearman')
+        
         self.total_lnk_model_runs = 0
         self.failed_lnk_model_runs = 0
         self.current_epoch_best_fun_value = 1000.0  # 最小化問題なので初期値は大きな値
@@ -91,11 +100,12 @@ class BaccusOptimizer:
             
         print(f"最適化開始時間: {start_time}\n")
         print(f"データセット '{self.cfg.data.name}' を使用します。")
+        print(f"目的関数: {self.objective_type}")
         
         if not self.use_I2:
             print("--- 警告: use_I2 = False ---")
         else:
-            print("\nI2 state (ksi, ksr) は最適化対象に含まれます。\n") # p_I2削除に伴いメッセージ修正
+            print("\nI2 state (ksi, ksr) は最適化対象に含まれます。\n") 
 
         # 入力データの正規化
         raw_input = np.genfromtxt(input_path)
@@ -116,13 +126,13 @@ class BaccusOptimizer:
         else:
             Output_full = raw_output
                 
-        self.J = self.cfg.hyper_params.J
+        self.J = self.cfg.model.hyper_params.J
         
         # トリミング処理
         try:
             dt = self.cfg.data.dt  # サンプリング間隔 (秒)
-            trim_i_seconds = self.cfg.hyper_params.trim_I_seconds # 入力データのトリミング秒数
-            trim_o_seconds = self.cfg.hyper_params.trim_O_seconds # 出力データのトリミング秒数
+            trim_i_seconds = self.cfg.model.hyper_params.trim_I_seconds # 入力データのトリミング秒数
+            trim_o_seconds = self.cfg.model.hyper_params.trim_O_seconds # 出力データのトリミング秒数
             # トリミングするインデックス数を計算
             trim_i_indices = int(trim_i_seconds / dt)
             trim_o_indices = int(trim_o_seconds / dt)
@@ -208,7 +218,7 @@ class BaccusOptimizer:
         """
         self.total_lnk_model_runs += 1
         try:
-            hp = self.cfg.hyper_params
+            hp = self.cfg.model.hyper_params
             dt = self.cfg.data.dt
             tau = hp.tau
             J = self.J
@@ -272,7 +282,7 @@ class BaccusOptimizer:
             # 飽和ペナルティ 
             # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
             if np.std(u_t) < 1e-6:  # 閾値は以前より緩和
-                print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
+                # print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
                 return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
             
             # Kinetic Model 
@@ -286,14 +296,14 @@ class BaccusOptimizer:
             with open(self.debug_log_path, "a") as f:
                 f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
             
-            print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+            # print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # Evaluation
-            correlation = 1.0  # ペナルティ値
+            correlation = 10.0  # デフォルトのペナルティ値
+            
             if check == 1:
                 current_len = len(W_state)
                 output_aligned = self.Output[:current_len]
-                
     
                 # DE_Simulationでは (-1 * w) と Output の相関を見ているため、ここでも -W を使う
                 model_aligned = -1.0 * W_state 
@@ -313,17 +323,20 @@ class BaccusOptimizer:
                     output_eval = output_aligned[mask_idx:]
                     model_eval = model_aligned[mask_idx:]
                     
-                    # 標準偏差チェック（平坦な線になっていないか）
-                    if np.std(model_eval) > 1e-9 and np.std(output_eval) > 1e-9:
-                        corr_val, _ = spearmanr(output_eval, model_eval)
-                        # 最大化問題 -> 最小化問題への変換 (-1をかける)
-                        correlation = -1 * corr_val 
+                    # --- 変更: 設定に応じて計算モジュールを切り替え ---
+                    if self.objective_type == 'hybrid':
+                        # 変数名を correlation に変更し、Hybridスコアを代入
+                        correlation = obj_hybrid.calculate(output_eval, model_eval)
                     else:
-                        correlation = 0.0 # 平坦ならスコアなし
+                        # 従来のSpearman順位相関
+                        correlation = obj_spearman.calculate(output_eval, model_eval)
+                    # ---------------------------------------------
+                        
                 else:
-                    correlation = 1.0
+                    correlation = 5.0 # 長さ不足時のペナルティ
             else:
                 self.failed_lnk_model_runs += 1
+                correlation = 5.0 # 計算失敗時のペナルティ
             
             self.current_epoch_best_fun_value = correlation
 
@@ -337,7 +350,7 @@ class BaccusOptimizer:
             import traceback
             traceback.print_exc()
             self.failed_lnk_model_runs += 1
-            return 1.0  # ペナルティ値
+            return 10.0  # ペナルティ値
         
     def save_intermediate_results(self, xk, convergence=None):
         """
@@ -382,7 +395,7 @@ class BaccusOptimizer:
         timestamp = time.strftime("%d_%H:%M:%S")
         # 表示を初期化 (行頭に戻り、行末までクリア)
         print(f"\r\033[K", end='')
-        tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
+        tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Cost: {self.current_epoch_best_fun_value:.4f} ---")
 
     def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, W_state):
         """
@@ -478,7 +491,7 @@ class BaccusOptimizer:
             # エラーが起きても、本番の最適化は続行してみる
             
         # Configからパラメータ境界(param_bounds)を取得
-        pb = self.cfg.hyper_params.param_bounds
+        pb = self.cfg.model.hyper_params.param_bounds
         J = self.J
         
         # alphas (L1-LJ) の境界を生成
@@ -550,84 +563,53 @@ class BaccusOptimizer:
                     f.write(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')\n")
                     
         except Exception as e:
-            print(f"エラー: 'optimization.strategy' の設定が不正です。")
-            print("config.yaml で mutation, n_vectors, crossover が正しく設定されているか確認してください。")
+            print(f"警告: 'optimization.strategy' の設定が不正です。デフォルトの 'best1bin' を使用します。")
             print(f"詳細: {e}")
-            raise # エラーが発生したら最適化を実行せずに終了
-        
-        de_result = differential_evolution(
-            self.lnk_model,      # 目的関数（最小化したい関数）
-            try_bounds,          # 探索するパラメータの範囲（各変数の上下限）
-            disp=True,           # 途中経過を表示する
-            updating=opt_cfg.updating,   # 並列計算や更新方法の設定
-            maxiter=opt_cfg.maxiter,     # 最大繰り返し回数
-            popsize=opt_cfg.popsize,     # 個体数（探索候補の数）
-            strategy=de_strategy_str,  # 差分進化の戦略（mutation の方法）
-            workers=opt_cfg.workers,     # 並列実行のためのスレッド・プロセス数
-            callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
-        )
+            de_strategy_str = 'best1bin'
 
-        print("\n大域探索 (DE) が完了しました。")
-        print(f"DE 最良スコア: {-de_result.fun:.6f}")
-        print("最適な結果を初期値として局所探索 (Powell) を開始します... (Phase 2: Refinement)")
-        
-        #局所探索 (Powell)
-        # config.yaml に local_maxiter を追加するか、ここではDEのイテレーション数を流用
-        local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2) 
-        result = minimize(
-            self.lnk_model,          # 目的関数
-            de_result.x,             # DEで見つけた最適解を初期値 (x0) に設定
-            method='Powell',         # 微分不要で高速な局所探索手法
-            bounds=try_bounds,       # 境界制約はそのまま維持
-            options={
-                'disp': True,        # 局所探索の経過も表示
-                'maxiter': local_maxiter # 局所探索用のイテレーション数
-            }
-        )
+        # --- 最適化の実行 ---
+        try:
+            # 実際の最適化処理
+            result = differential_evolution(
+                self.lnk_model, 
+                bounds=try_bounds, 
+                strategy=de_strategy_str,
+                maxiter=opt_cfg.maxiter, 
+                popsize=opt_cfg.popsize, 
+                tol=1e-6, 
+                mutation=(0.5, 1.0), 
+                recombination=0.7, 
+                disp=True,
+                callback=self.save_intermediate_results,
+                workers=opt_cfg.workers,
+                updating=opt_cfg.updating
+            )
+            
+            print(f"\n最適化完了。終了コード: {result.message}")
+            
+            # 最適化されたパラメータ
+            optimal_params = result.x
+            
+            # 最終的なモデルの状態を取得して保存
+            # ここでは最終スコア(correlation)を返り値から取得
+            optimal_correlation, R_final, A_final, I1_final, I2_final, W_final = self.lnk_model(optimal_params, save_states=True)
+            
+            # 結果の保存
+            self.save_optimal_results(optimal_params, optimal_correlation, R_final, A_final, I1_final, I2_final, W_final)
 
-        print("\nハイブリッド最適化が完了しました。")
-        pprint.pprint(result)
-        
-        print("\n--- 検証統計 ---")
-        # 成功した実行回数を計算
-        successful_runs = self.total_lnk_model_runs - self.failed_lnk_model_runs
-        
-        # 成功率を計算 (ゼロ除算を回避)
-        if self.total_lnk_model_runs > 0:
-            success_rate = (successful_runs / self.total_lnk_model_runs) * 100.0
-        else:
-            success_rate = 0.0  # 実行がなかった場合
+            # 実行終了時にMLflowの実行を明示的に終了（通常はwith文で管理するが念のため）
+            mlflow.end_run()
 
-        # ターミナルに表示
-        print(f"総試行回数 (total_lnk_model_runs): {self.total_lnk_model_runs}")
-        print(f"成功回数 (check=1): {successful_runs}")
-        print(f"失敗回数 (check=0 or Error): {self.failed_lnk_model_runs}")
-        print(f"成功率: {success_rate:.2f}%")
-        
-        # MLflowにメトリクスとして保存
-        mlflow.log_metric("final_total_runs", self.total_lnk_model_runs)
-        mlflow.log_metric("final_successful_runs", successful_runs)
-        mlflow.log_metric("final_success_rate_percent", success_rate)
-        
-        print("検証統計をMLflowに保存しました。")
-        
-        optimal_params = result.x
-        optimal_correlation = -result.fun
-
-        # 戻り値受け取り変更
-        res_tuple = self.lnk_model(optimal_params, save_states=True)
-        # res_tuple: (corr, R, A, I1, I2, W)
-        
-        if len(res_tuple) == 6:
-            _, r_final, a_final, i1_final, i2_final, w_final = res_tuple
-            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final, w_final)
-            mlflow.log_artifacts(self.results_dir, artifact_path="results")
-        else:
-            print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
-            print(f"最終的な相関係数: {optimal_correlation:.4f}")
-            # 失敗した場合でも、最終的な相関係数だけは記録しておく
-            mlflow.log_metric("final_correlation_on_failure", optimal_correlation)
-
+        except KeyboardInterrupt:
+            print("\nユーザーによる中断。現在の最良の結果を保存します...")
+            # 中断時でもそれまでの最良の結果があれば保存したい場合の処理をここに記述可能
+            # 現状はそのまま終了
+            pass
+        except Exception as e:
+            print(f"最適化実行中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+                
 @hydra.main(version_base=None, config_path="../config", config_name="config")
 def main(cfg: DictConfig):
     """
