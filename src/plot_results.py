@@ -1,428 +1,373 @@
-# plot_specific_params.py
+import os
+import sys
+import yaml
 import numpy as np
 import matplotlib.pyplot as plt
-import os
-import re
-import yaml
-import time
+from scipy.signal import fftconvolve
 from scipy.stats import spearmanr
+import glob
+import re
 
-# components 以下のモジュールをインポートするためにsys.pathに追加
-import sys
-project_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # このファイル(__file__)の絶対パスのルートディレクトリを取得して一個上の階層を指定
-sys.path.append(project_root_dir)
-# これを追加することで、 以下のモジュールのインポートを簡単にする
-import components.L_LNK as L_LNK
-import components.N_Komada as N_Komada
-import components.K_baccus as K_LNK
-
-# 設定ファイルを読み込む関数
-def load_config(filepath):
-    """
-    ハイパーパラメータ設定ファイルを読み込みます。
-    """
-    with open(filepath, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
-    return config
-
-# config.yaml のパス
-script_dir = os.path.dirname(os.path.abspath(__file__))
-config_file_path = os.path.join(script_dir, "components", "config", "Baccus.yaml")
-
-# 設定の読み込み
+# 日本語フォント対応
 try:
-    config = load_config(config_file_path)
-except FileNotFoundError:
-    print(f"エラー: '{config_file_path}' が見つかりません。設定ファイルを読み込めません。")
-    sys.exit(1)
-except yaml.YAMLError as exc:
-    print(f"YAMLファイルのパースエラー: {exc}")
-    sys.exit(1)
-except KeyError as e:
-    print(f"設定ファイルに予期せぬキーがありません: {e}")
-    sys.exit(1)
+    import japanize_matplotlib
+except ImportError:
+    pass
 
-# --- ここで日付を手動で指定します (グラフ保存先のディレクトリ名に使用) ---
-date_str = "20250711_12" # 任意のディレクトリ名に設定してください
-
-# 設定から必要な値を取得
-data_options = config['data_options']
-J = config['J'] # 基底関数の数
-
-# Provided_Data をロード
-if data_options == "cb1":
-    print("cb1のデータを使用します")
-    Input_data = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "wn_0.0002s.txt"))
-    Output_data = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb1", "cb1_Fourier_Result.txt"))
-elif data_options == "cb2":
-    print("cb2のデータを使用します")
-    Input_data = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "wn.txt"))
-    Output_data = np.genfromtxt(os.path.join(script_dir, "components", "Provided_Data", "cb2", "cb2_Fourier_Result.txt"))
-else:
-    print(f"エラー: 未知のデータオプション '{data_options}' です。入出力データを決定できません。")
+# srcディレクトリをパスに追加
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+try:
+    import components.L_LNK as L_LNK
+    import components.N_LNK as N_LNK
+    import components.K_baccus as K_LNK
+except ImportError:
+    print("エラー: 'src/components' が見つかりません。")
     sys.exit(1)
 
-# LNK_model 関数の再定義 (グラフ描画のために必要な部分のみ)
-def LNK_model_for_plot(x, Input_data_arg, Output_data_arg, dt, J, config_params):
-    """
-    最適なパラメータを用いてLNKモデルを実行し、A_stateと相関を返す。
-    """
-    R_start = config_params['R_start']
-    A_start = config_params['A_start']
-    I1_start = config_params['I_start']
-    I2_start = 0.0
-    tau = config_params['tau']
+def load_yaml(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
-    alphas = x[0:J]
-    delta = x[J]
-    a_nonlinear = x[J+1]
-    b1_nonlinear = x[J+2]
-    b2_nonlinear = x[J+3]
-    ka_kinetic = x[J+4]
-    kfi_kinetic = x[J+5]
-    kfr_kinetic = x[J+6]
+def load_data(config_path):
+    """データをロードし、学習時と同じ正規化を行う"""
+    cfg = load_yaml(config_path)
+    base_dir = os.path.dirname(config_path)
+    input_path = cfg['input_file']
+    output_path = cfg['output_file']
+    dt = cfg['dt']
 
-    ksi_kinetic = 0.0
-    ksr_kinetic = 0.0
+    print(f"Loading data from: {input_path}")
+    raw_input = np.genfromtxt(input_path)
+    raw_output = np.genfromtxt(output_path)
 
-    Linear_Filter_kernel, _ = L_LNK.main(alphas, delta, dt, tau, J)
-    tild_g_full = np.convolve(Input_data_arg, Linear_Filter_kernel, mode='full')
-    g_len = len(Input_data_arg)
-    tild_g = tild_g_full[:g_len]
-
-    Record1 = np.sum(tild_g * tild_g) * dt
-    Record2 = np.sum(Input_data_arg * Input_data_arg) * dt
-    
-    if Record2 <= 1e-9:
-        scale_Linear = 1.0
+    # 1. Input: Z-score 正規化
+    input_std = np.std(raw_input)
+    if input_std > 1e-9:
+        norm_input = (raw_input - np.mean(raw_input)) / input_std
     else:
-        scale_Linear = np.sqrt(Record1 / Record2)
+        norm_input = raw_input - np.mean(raw_input)
 
-    g = tild_g / scale_Linear
+    # 2. Output: Max-Abs Scaling
+    max_val = np.max(np.abs(raw_output))
+    if max_val > 1e-9:
+        norm_output = raw_output / max_val
+    else:
+        norm_output = raw_output
 
-    U_Nonlinear = N_Komada.main(g, a_nonlinear, b1_nonlinear, b2_nonlinear)
+    return norm_input, norm_output, dt
 
-    R_state, A_state, I1_state, I2_state, check_raw = K_LNK.main(
-        len(U_Nonlinear), U_Nonlinear, dt, R_start, A_start, I1_start, I2_start,
-        ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
-        label="Plotting Run"
+def load_params_from_dir(results_dir):
+    """パラメータ読み込み関数 (epochファイルを優先)"""
+    params = {}
+    
+    # BaccusModel.py の変更に合わせて、初期値パラメータ(p_R等)を削除
+    # J個のalphasの後に続くスカラーパラメータのリスト
+    keys_order = [
+        'delta', 'a', 'kappa', 'b1', 'b2', 
+        'ka', 'kfi', 'kfr', 'ksi', 'ksr', 
+        'w_gain', 'w_decay'
+    ]
+    num_scalar_params = len(keys_order) # 12個
+    
+    # 1. まず epoch_*.txt (まとまったファイル) を探す
+    epoch_files = glob.glob(os.path.join(results_dir, "epochs", "epoch_*_params.txt"))
+    if not epoch_files:
+        epoch_files = glob.glob(os.path.join(results_dir, "epoch_*_params.txt"))
+        
+    if epoch_files:
+        # 数字部分を抽出してソートし、最新のファイルを取得
+        def extract_epoch_num(path):
+            match = re.search(r'epoch_(\d+)_params', path)
+            return int(match.group(1)) if match else 0
+            
+        latest_file = max(epoch_files, key=extract_epoch_num)
+        print(f"Loading from single file (PRIORITY): {latest_file}")
+        vals = np.loadtxt(latest_file)
+        
+        # Jの推定: 全パラメータ数 - スカラーパラメータ数
+        if len(vals) < num_scalar_params:
+             print("エラー: パラメータファイルが短すぎます。")
+             sys.exit(1)
+             
+        J = len(vals) - num_scalar_params
+        params['J'] = J
+        params['alphas'] = vals[0:J]
+        
+        for i, k in enumerate(keys_order):
+            val = float(vals[J + i])
+            # kaのゼロ除算対策
+            if k == 'ka' and abs(val) < 1e-9:
+                val = 1.0
+            params[k] = val
+
+    # 2. epochファイルがない場合のみ、個別ファイル (L*.txt) を探す
+    else:
+        l_files = glob.glob(os.path.join(results_dir, "L*.txt"))
+        
+        if l_files:
+            l_files.sort(key=lambda x: int(os.path.basename(x).replace('L', '').replace('.txt', '')))
+            alphas = [float(np.loadtxt(f)) for f in l_files]
+            params['alphas'] = np.array(alphas)
+            params['J'] = len(alphas)
+            
+            for k in keys_order:
+                p_path = os.path.join(results_dir, f"{k}.txt")
+                if os.path.exists(p_path):
+                    val = float(np.loadtxt(p_path))
+                    if k == 'ka' and abs(val) < 1e-9:
+                        print(f"警告: {k} が 0.0 に近いため 1.0 に補正します。")
+                        val = 1.0
+                    params[k] = val
+                else:
+                    if k == 'ka':
+                        params[k] = 1.0
+                    elif k == 'kappa':
+                         params[k] = 1.0
+                    else:
+                        params[k] = 0.0 
+            print(f"Loaded from individual files. J={params['J']}")
+        else:
+            print("エラー: パラメータファイルが見つかりません。")
+            sys.exit(1)
+
+    return params
+
+def calculate_steady_state(params):
+    """
+    パラメータから平均入力に対する定常状態(R, A, I1, I2)を計算する。
+    BaccusModel.py の _calculate_steady_state と同じロジック。
+    """
+    a = params['a']
+    kappa = params['kappa']
+    b1 = params['b1']
+    b2 = params['b2']
+    ka = params['ka']
+    kfi = params['kfi']
+    kfr = params['kfr']
+    ksi = params['ksi']
+    ksr = params['ksr']
+
+    # 1. 定常入力 u_steady の計算 (入力=0 のときの非線形応答)
+    # N_LNK.main は配列を返すので [0] を取得
+    u_steady = N_LNK.main(np.array([0.0]), a, kappa, b1, b2, ka)[0]
+    u_steady = max(0.0, u_steady)
+
+    # 2. 定常状態の代数的計算
+    if kfi > 1e-9:
+        A_ratio = (ka * u_steady) / kfi
+    else:
+        A_ratio = 0.0
+        
+    if kfr > 1e-9:
+        I1_ratio = (ka * u_steady) / kfr
+    else:
+        I1_ratio = 0.0
+
+    if kfr > 1e-9 and ksr > 1e-9:
+         # I2への分岐がある場合 (use_I2=True前提で計算)
+         # I2 = (ksi * I1) / (ksr * u) -> I2 = (ksi * ka) / (kfr * ksr)
+        I2_ratio = (ksi * ka) / (kfr * ksr)
+    else:
+        I2_ratio = 0.0
+
+    # 3. 合計が1になるように正規化
+    total = 1.0 + A_ratio + I1_ratio + I2_ratio
+    
+    return (1.0/total), (A_ratio/total), (I1_ratio/total), (I2_ratio/total)
+
+def run_prediction(params, Input, dt, tau=1.0):
+    """
+    モデルを実行し、g_t, u_t, W (電流) を返す
+    """
+    # 初期状態をパラメータから計算
+    R0, A0, I10, I20 = calculate_steady_state(params)
+    
+    # 1. Linear Filter
+    filter_points = int(tau / dt) + 1
+    linear_filter_kernel, _ = L_LNK.main(params['alphas'], params['delta'], filter_points, dt, tau)
+    
+    g_full = fftconvolve(Input, linear_filter_kernel, mode='full')
+    shift_idx = int(tau / dt) 
+    
+    if len(g_full) > shift_idx + len(Input):
+        g_t = g_full[shift_idx : shift_idx + len(Input)]
+    else:
+        g_t = g_full[:len(Input)]
+    
+    g_std = np.std(g_t)
+    if g_std > 1e-9:
+        g_t = g_t / g_std
+
+    # 2. Nonlinear Module
+    u_t = N_LNK.main(
+        g_t, 
+        params['a'], 
+        params['kappa'], 
+        params['b1'], 
+        params['b2'], 
+        params['ka']
     )
     
-    check = None
-    if isinstance(check_raw, np.ndarray):
-        if check_raw.size == 1:
-            check = check_raw.item()
-        else:
-            check = 0 # 複数要素の配列は失敗とみなす
-    else:
-        check = check_raw
+    # 3. Kinetic Model
+    R, A, I1, I2, W, check = K_LNK.main(
+        len(u_t), u_t, dt, 
+        R0, A0, I10, I20,
+        params['ka'], params['kfi'], params['kfr'], params['ksi'], params['ksr'],
+        params['w_gain'], params['w_decay'],
+        label="Validation"
+    )
+    
+    return g_t, u_t, W, check
 
+def main(data_config_path, results_dir, tau=1.0):
+    if not os.path.exists(results_dir):
+        print(f"エラー: ディレクトリが見つかりません: {results_dir}")
+        return
+
+    # データロード
+    Input, Output_exp, dt = load_data(data_config_path)
+    
+    # パラメータロード
+    print(f"Loading parameters from {results_dir}...")
+    try:
+        params = load_params_from_dir(results_dir)
+    except Exception as e:
+        print(f"パラメータ読み込みエラー: {e}")
+        return
+
+    min_len = min(len(Input), len(Output_exp))
+    Input = Input[:min_len]
+    Output_exp = Output_exp[:min_len]
+
+    print("Running model prediction...")
+    # W_raw (生の電流値) を受け取る
+    g_t, u_t, W_raw, check = run_prediction(params, Input, dt, tau=tau)
+    
     if check != 1:
-        print("Warning: Kinetic model failed in LNK_model_for_plot. Returning None for states.")
-        return None, None, None, None, 0.0
-
-    keep_Post = (-1) * A_state[:len(Output_data_arg)]
-    min_len_corr = min(len(Output_data_arg), len(keep_Post))
-    Output_trimmed_corr = Output_data_arg[:min_len_corr]
-    keep_Post_trimmed_corr = keep_Post[:min_len_corr]
-
-    if min_len_corr > 1:
-        correlation, _ = spearmanr(Output_trimmed_corr, keep_Post_trimmed_corr)
-    else:
-        correlation = 0.0
-
-    return R_state, A_state, I1_state, I2_state, correlation
-
-
-# 結果を保存するディレクトリを準備
-results_base_dir = os.path.join(project_root_dir, 'results', 'Baccus_' + data_options)
-target_result_dir = os.path.join(results_base_dir, date_str)
-os.makedirs(target_result_dir, exist_ok=True) # ディレクトリが存在しない場合は作成
-
-# --- 比較する2つのパラメータセット ---
-# 94-parents.txt のパラメータ (以前のModel 1)
-params_94_parents = np.array([
-    0.992053, 0.057222, 0.214281, 0.240299, 0.425180,
-    0.385704, 0.017517, 0.696799, 0.247215, 0.175373,
-    0.424967, 0.153786, 0.064951, 0.451844, 0.585853,
-    0.180307, 4.209184, 0.665612, -0.281921, 0.625779,
-    0.948792, 0.221268
-])
-
-# 03-params.txt のパラメータ (以前のModel 2)
-params_03_params = np.array([
-    0.850741, 0.043609, 0.314961, 0.115735, 0.405859,
-    0.181998, 0.488759, 0.201215, 0.388303, 0.646640,
-    0.021255, 0.884164, 0.723802, 0.443743, 0.024795,
-    0.083580, 9.336384, 4.152542, -0.673780, 0.419078,
-    0.164253, 0.170182
-])
-
-print("提供されたパラメータデータを用いてLNKモデルの出力を生成中...")
-
-try:
-    # --- 94-parents.txt の出力を計算 ---
-    print("94-parents.txt の出力を計算中...")
-    _, calculated_A_state_94, _, _, final_correlation_94 = LNK_model_for_plot(
-        params_94_parents, Input_data, Output_data, config['dt'], J, config
-    )
-    if calculated_A_state_94 is None:
-        print("エラー: 94-parents.txt のLNKモデル実行が失敗しました。グラフを作成できません。")
-        sys.exit(1)
-    calculated_output_trimmed_94 = (-1) * calculated_A_state_94[:len(Output_data)]
-
-    # --- 03-params.txt の出力を計算 ---
-    print("03-params.txt の出力を計算中...")
-    _, calculated_A_state_03, _, _, final_correlation_03 = LNK_model_for_plot(
-        params_03_params, Input_data, Output_data, config['dt'], J, config
-    )
-    if calculated_A_state_03 is None:
-        print("エラー: 03-params.txt のLNKモデル実行が失敗しました。グラフを作成できません。")
-        sys.exit(1)
-    calculated_output_trimmed_03 = (-1) * calculated_A_state_03[:len(Output_data)]
-
-    # 時間軸の生成 (共通の長さに合わせる)
-    min_overall_len = min(len(calculated_output_trimmed_94), len(calculated_output_trimmed_03), len(Output_data))
-    time_axis = np.arange(0, min_overall_len * config['dt'], config['dt'])
-
-    # 共通の長さにトリミング
-    Provided_Output_trimmed = Output_data[:min_overall_len]
-    calculated_output_trimmed_94 = calculated_output_trimmed_94[:min_overall_len]
-    calculated_output_trimmed_03 = calculated_output_trimmed_03[:min_overall_len]
-
-
-    # --- 共通のデータ抽出と処理 (時間軸1000秒以上) ---
-    time_indices_1000_plus = np.where(time_axis >= 1000)[0]
+        print("Kineticモデル計算失敗。")
+        W_raw = np.zeros_like(Output_exp)
+        corr = 0.0
     
-    if len(time_indices_1000_plus) == 0:
-        print("警告: 時間軸1000秒以上のデータポイントが見つかりませんでした。関連するグラフは作成されません。")
+    min_len_eval = min(len(Output_exp), len(W_raw), len(g_t), len(u_t))
+    Output_exp = Output_exp[:min_len_eval]
+    W_raw = W_raw[:min_len_eval]
+    g_t = g_t[:min_len_eval]
+    u_t = u_t[:min_len_eval]
+    Input_plot = Input[:min_len_eval]
+
+    # --- データの保存 ---
+    
+    # 1. predict.txt (相関計算用の正規化後データ)
+    # DE_Simulationでは (-1 * w) と相関を見ていたので、ここでも反転させる
+    Prediction = -1.0 * W_raw 
+    
+    # 平均0, 最大絶対値1に正規化 (比較用)
+    Prediction = Prediction - np.mean(Prediction)
+    p_max = np.max(np.abs(Prediction))
+    if p_max > 1e-9:
+        Prediction = Prediction / p_max
+
+    # 2. masked_pre.txt (マスク済み)
+    masked_pre = Prediction.copy()
+    mask_steps = int(1.0 / dt) # 1秒マスク
+    if mask_steps > len(masked_pre): mask_steps = len(masked_pre)
+
+    if len(masked_pre) > mask_steps:
+        fill_val = np.mean(masked_pre[mask_steps:])
     else:
-        start_idx_1000_plus = time_indices_1000_plus[0]
-
-        time_axis_1000_plus = time_axis[start_idx_1000_plus:]
-        Provided_Output_1000_plus = Provided_Output_trimmed[start_idx_1000_plus:]
-        calculated_output_1000_plus_94 = calculated_output_trimmed_94[start_idx_1000_plus:]
-        calculated_output_1000_plus_03 = calculated_output_trimmed_03[start_idx_1000_plus:]
-
-
-        # --- 処理済みデータセットの準備 ---
-
-        # 平均0移動 & L2ノルム正規化されたデータ
-        mean_centered_Provided_Output_L2 = Provided_Output_1000_plus.copy()
-        mean_centered_calculated_Output_L2_94 = calculated_output_1000_plus_94.copy()
-        mean_centered_calculated_Output_L2_03 = calculated_output_1000_plus_03.copy()
-
-        if len(mean_centered_Provided_Output_L2) > 0:
-            mean_centered_Provided_Output_L2 -= np.mean(mean_centered_Provided_Output_L2)
-        if len(mean_centered_calculated_Output_L2_94) > 0:
-            mean_centered_calculated_Output_L2_94 -= np.mean(mean_centered_calculated_Output_L2_94)
-        if len(mean_centered_calculated_Output_L2_03) > 0:
-            mean_centered_calculated_Output_L2_03 -= np.mean(mean_centered_calculated_Output_L2_03)
-        
-        norm_provided_mc = np.linalg.norm(mean_centered_Provided_Output_L2)
-        norm_calculated_mc_94 = np.linalg.norm(mean_centered_calculated_Output_L2_94)
-        norm_calculated_mc_03 = np.linalg.norm(mean_centered_calculated_Output_L2_03)
-
-        if norm_provided_mc != 0:
-            mean_centered_Provided_Output_L2 /= norm_provided_mc
-        if norm_calculated_mc_94 != 0:
-            mean_centered_calculated_Output_L2_94 /= norm_calculated_mc_94
-        if norm_calculated_mc_03 != 0:
-            mean_centered_calculated_Output_L2_03 /= norm_calculated_mc_03
-
-        # L2ノルム正規化のみされたデータ (平均0移動なし)
-        l2_normalized_Provided_Output = Provided_Output_1000_plus.copy()
-        l2_normalized_calculated_Output_94 = calculated_output_1000_plus_94.copy()
-        l2_normalized_calculated_Output_03 = calculated_output_1000_plus_03.copy()
-
-        norm_provided_l2 = np.linalg.norm(l2_normalized_Provided_Output)
-        norm_calculated_l2_94 = np.linalg.norm(l2_normalized_calculated_Output_94)
-        norm_calculated_l2_03 = np.linalg.norm(l2_normalized_calculated_Output_03)
-
-        if norm_provided_l2 != 0:
-            l2_normalized_Provided_Output /= norm_provided_l2
-        if norm_calculated_l2_94 != 0:
-            l2_normalized_calculated_Output_94 /= norm_calculated_l2_94
-        if norm_calculated_l2_03 != 0:
-            l2_normalized_calculated_Output_03 /= norm_calculated_l2_03
-
-
-        # --- 既存のグラフ: 時間軸1000以上全体 & 平均0移動 & L2ノルム正規化 (単一グラフ) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'Normalized & Mean-Centered LNK Model Comparison (Data: {data_options}) [Time Axis >= 1000s, Mean Shifted to 0, L2-Normalized]', fontsize=16)
-
-        ax1 = plt.subplot(1, 1, 1)
-        ax1.plot(time_axis_1000_plus, mean_centered_Provided_Output_L2, 
-                 label='Normalized & Mean-Centered Provided Output', alpha=0.7, color='blue') 
-        ax1.plot(time_axis_1000_plus, mean_centered_calculated_Output_L2_94, 
-                 label='Normalized & Mean-Centered LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-        ax1.plot(time_axis_1000_plus, mean_centered_calculated_Output_L2_03, 
-                 label='Normalized & Mean-Centered LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-        
-        ax1.set_title('Normalized & Mean-Centered Outputs - Time >= 1000s')
-        ax1.set_xlabel('Time (s)')
-        ax1.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-        ax1.legend()
-        ax1.grid(True)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-        
-        graph_filepath_1000_plus_mean_centered_l2_norm = os.path.join(target_result_dir, 'LNK_model_output_comparison_time_1000_plus_mean_centered_l2_norm.png')
-        plt.savefig(graph_filepath_1000_plus_mean_centered_l2_norm)
-        print(f"時間軸1000秒以上で平均0移動＆L2正規化グラフを {graph_filepath_1000_plus_mean_centered_l2_norm} に保存しました。")
-
-
-        # --- 既存のグラフ: 時間軸1000秒〜2000秒に拡大 (正規化＆平均0移動済み) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'Normalized & Mean-Centered LNK Model Comparison (Data: {data_options}) [Time Axis 1000s-2000s, Mean Shifted to 0, L2-Normalized]', fontsize=16)
-
-        zoom_start_1 = 1000
-        zoom_end_1 = 2000
-        zoom_indices_1 = np.where((time_axis_1000_plus >= zoom_start_1) & (time_axis_1000_plus <= zoom_end_1))[0]
-
-        if len(zoom_indices_1) == 0:
-            print(f"警告: 時間軸 {zoom_start_1}s-{zoom_end_1}s のデータポイントが見つかりませんでした。拡大グラフは作成されません。")
+        fill_val = 0.0
+    masked_pre[:mask_steps] = fill_val
+    
+    # 相関計算 (マスク済みデータで計算)
+    if check == 1:
+        if len(Output_exp) > mask_steps:
+             corr, _ = spearmanr(Output_exp[mask_steps:], masked_pre[mask_steps:])
         else:
-            ax2 = plt.subplot(1, 1, 1)
-            ax2.plot(time_axis_1000_plus[zoom_indices_1], mean_centered_Provided_Output_L2[zoom_indices_1], 
-                     label='Normalized & Mean-Centered Provided Output', alpha=0.7, color='blue') 
-            ax2.plot(time_axis_1000_plus[zoom_indices_1], mean_centered_calculated_Output_L2_94[zoom_indices_1], 
-                     label='Normalized & Mean-Centered LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-            ax2.plot(time_axis_1000_plus[zoom_indices_1], mean_centered_calculated_Output_L2_03[zoom_indices_1], 
-                     label='Normalized & Mean-Centered LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-            
-            ax2.set_title(f'Normalized & Mean-Centered Outputs - Time {zoom_start_1}s-{zoom_end_1}s')
-            ax2.set_xlabel('Time (s)')
-            ax2.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-            ax2.legend()
-            ax2.grid(True)
-            ax2.set_xlim(zoom_start_1, zoom_end_1)
+             corr, _ = spearmanr(Output_exp, masked_pre)
+        print(f"Spearman Correlation (Masked): {corr:.6f}")
+    else:
+        corr = 0.0
 
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-            
-            graph_filepath_zoom_1 = os.path.join(target_result_dir, f'LNK_model_output_comparison_time_{zoom_start_1}s_to_{zoom_end_1}s_normalized_mean_centered_l2_norm.png')
-            plt.savefig(graph_filepath_zoom_1)
-            print(f"時間軸{zoom_start_1}s-{zoom_end_1}sの拡大グラフを {graph_filepath_zoom_1} に保存しました。")
+    # 保存
+    save_dir = os.path.join(results_dir, "validation")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    np.savetxt(os.path.join(save_dir, "g.txt"), g_t, fmt='%.6f')
+    np.savetxt(os.path.join(save_dir, "u.txt"), u_t, fmt='%.6f')
+    
+    # r.txt には生の出力 (電流 W_raw) を保存
+    np.savetxt(os.path.join(save_dir, "r.txt"), W_raw, fmt='%.6f')
+    
+    # predict.txt には正規化後の予測応答
+    np.savetxt(os.path.join(save_dir, "predict.txt"), Prediction, fmt='%.6f')
+    
+    np.savetxt(os.path.join(save_dir, "masked_pre.txt"), masked_pre, fmt='%.6f')
+    print(f"保存完了: {save_dir}")
 
+    # プロット
+    total_time = len(Input_plot) * dt
+    time_axis = np.arange(len(Input_plot)) * dt
+    major_ticks = np.arange(0, int(total_time) + 1, 1)
 
-        # --- 既存のグラフ: 時間軸2000秒〜3000秒に拡大 (正規化＆平均0移動済み) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'Normalized & Mean-Centered LNK Model Comparison (Data: {data_options}) [Time Axis 2000s-3000s, Mean Shifted to 0, L2-Normalized]', fontsize=16)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=False) 
+    def setup_axis(ax, title, ylabel):
+        ax.set_title(title, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_xlim(0, total_time)
+        ax.set_xticks(major_ticks) 
+        ax.grid(which='major', alpha=0.5) 
+        ax.set_xlabel('Time (s)', fontsize=10) 
 
-        zoom_start_2 = 2000
-        zoom_end_2 = 3000
-        zoom_indices_2 = np.where((time_axis_1000_plus >= zoom_start_2) & (time_axis_1000_plus <= zoom_end_2))[0]
+    axes[0].plot(time_axis, Input_plot, color='gray', linewidth=1)
+    setup_axis(axes[0], '1. Input Stimulus (Normalized)', 'Contrast')
 
-        if len(zoom_indices_2) == 0:
-            print(f"警告: 時間軸 {zoom_start_2}s-{zoom_end_2}s のデータポイントが見つかりませんでした。拡大グラフは作成されません。")
-        else:
-            ax3 = plt.subplot(1, 1, 1)
-            ax3.plot(time_axis_1000_plus[zoom_indices_2], mean_centered_Provided_Output_L2[zoom_indices_2], 
-                     label='Normalized & Mean-Centered Provided Output', alpha=0.7, color='blue') 
-            ax3.plot(time_axis_1000_plus[zoom_indices_2], mean_centered_calculated_Output_L2_94[zoom_indices_2], 
-                     label='Normalized & Mean-Centered LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-            ax3.plot(time_axis_1000_plus[zoom_indices_2], mean_centered_calculated_Output_L2_03[zoom_indices_2], 
-                     label='Normalized & Mean-Centered LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-            
-            ax3.set_title(f'Normalized & Mean-Centered Outputs - Time {zoom_start_2}s-{zoom_end_2}s')
-            ax3.set_xlabel('Time (s)')
-            ax3.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-            ax3.legend()
-            ax3.grid(True)
-            ax3.set_xlim(zoom_start_2, zoom_end_2)
+    axes[1].plot(time_axis, g_t, color='blue', linewidth=1)
+    setup_axis(axes[1], '2. Linear Filter Output g(t) [Normalized]', 'Filtered Signal')
 
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-            
-            graph_filepath_zoom_2 = os.path.join(target_result_dir, f'LNK_model_output_comparison_time_{zoom_start_2}s_to_{zoom_end_2}s_normalized_mean_centered_l2_norm.png')
-            plt.savefig(graph_filepath_zoom_2)
-            print(f"時間軸{zoom_start_2}s-{zoom_end_2}sの拡大グラフを {graph_filepath_zoom_2} に保存しました。")
+    axes[2].plot(time_axis, u_t, color='green', linewidth=1)
+    setup_axis(axes[2], '3. Nonlinear Output u(t)', 'Rate (u)')
 
+    # 4段目: 実測値 vs 予測値 (電流)
+    axes[3].plot(time_axis, Output_exp, color='black', alpha=0.5, label='Experiment', linewidth=1.5)
+    axes[3].plot(time_axis, masked_pre, color='red', alpha=0.8, label=f'Model Current (Corr={corr:.3f})', linewidth=1.5)
+    setup_axis(axes[3], '4. Final Response (Synaptic Current W)', 'Response')
+    axes[3].legend()
 
-        # --- 新規グラフ: 時間軸1000以上のみ & L2ノルム正規化 (平均0移動なし) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'L2-Normalized LNK Model Comparison (Data: {data_options}) [Time Axis >= 1000s, L2-Normalized Only]', fontsize=16)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "detailed_analysis_current.png"))
+    print("グラフ保存完了")
 
-        ax4 = plt.subplot(1, 1, 1)
-        ax4.plot(time_axis_1000_plus, l2_normalized_Provided_Output, 
-                 label='L2-Normalized Provided Output', alpha=0.7, color='blue') 
-        ax4.plot(time_axis_1000_plus, l2_normalized_calculated_Output_94, 
-                 label='L2-Normalized LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-        ax4.plot(time_axis_1000_plus, l2_normalized_calculated_Output_03, # Model 2 を赤色で追加
-                 label='L2-Normalized LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-        
-        ax4.set_title('L2-Normalized Outputs - Time >= 1000s (Not Mean-Centered)')
-        ax4.set_xlabel('Time (s)')
-        ax4.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-        ax4.legend()
-        ax4.grid(True)
+if __name__ == "__main__":
+    # =================================================================
+    # ▼▼▼ ここに使用するデータと結果フォルダの詳細を入力してください ▼▼▼
+    # =================================================================
+    
+    # 1. データ設定ファイル (.yaml) のパス
+    # TARGET_CONFIG = "config/data/Ucb1.yaml"
+    # TARGET_CONFIG = "config/data/Ucb2.yaml"
+    TARGET_CONFIG = "config/data/ret2p-1.yaml"
+    
+    # 2. 学習結果が保存されているディレクトリ
+    # TARGET_DIR = "scripts/cb1/20251217_00"
+    # TARGET_DIR = "scripts/cb2/20251213_02"
+    TARGET_DIR = "scripts/ret2p/20251217_14"
+    
+    # 3. 時定数 (Tau)
+    TARGET_TAU = 1.0
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-        
-        graph_filepath_1000_plus_l2_norm_only = os.path.join(target_result_dir, 'LNK_model_output_comparison_time_1000_plus_l2_norm_only.png')
-        plt.savefig(graph_filepath_1000_plus_l2_norm_only)
-        print(f"時間軸1000秒以上でL2正規化のみのグラフを {graph_filepath_1000_plus_l2_norm_only} に保存しました。")
+    # =================================================================
+    
+    # コマンドライン引数がある場合はそちらを優先
+    if len(sys.argv) > 1:
+        TARGET_DIR = sys.argv[1]
+    if len(sys.argv) > 2:
+        TARGET_CONFIG = sys.argv[2]
 
+    print(f"--- 実行設定 ---")
+    print(f"Config : {TARGET_CONFIG}")
+    print(f"Results: {TARGET_DIR}")
+    print(f"Tau    : {TARGET_TAU}")
+    print(f"---------------")
 
-        # --- 新規グラフ: 時間軸1000秒〜2000秒に拡大 (L2ノルム正規化のみ) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'L2-Normalized LNK Model Output Comparison (Data: {data_options}) [Time Axis 1000s-2000s, L2-Normalized Only]', fontsize=16)
-
-        if len(zoom_indices_1) == 0: # zoom_indices_1は既に計算済み
-            print(f"警告: 時間軸 {zoom_start_1}s-{zoom_end_1}s のデータポイントが見つからなかったため、L2正規化のみの拡大グラフは作成されません。")
-        else:
-            ax5 = plt.subplot(1, 1, 1)
-            ax5.plot(time_axis_1000_plus[zoom_indices_1], l2_normalized_Provided_Output[zoom_indices_1], 
-                     label='L2-Normalized Provided Output', alpha=0.7, color='blue') 
-            ax5.plot(time_axis_1000_plus[zoom_indices_1], l2_normalized_calculated_Output_94[zoom_indices_1], 
-                     label='L2-Normalized LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-            ax5.plot(time_axis_1000_plus[zoom_indices_1], l2_normalized_calculated_Output_03[zoom_indices_1], # Model 2 を赤色で追加
-                     label='L2-Normalized LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-            
-            ax5.set_title(f'L2-Normalized Outputs - Time {zoom_start_1}s-{zoom_end_1}s (Not Mean-Centered)')
-            ax5.set_xlabel('Time (s)')
-            ax5.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-            ax5.legend()
-            ax5.grid(True)
-            ax5.set_xlim(zoom_start_1, zoom_end_1)
-
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-            
-            graph_filepath_zoom_1_l2_only = os.path.join(target_result_dir, f'LNK_model_output_comparison_time_{zoom_start_1}s_to_{zoom_end_1}s_l2_norm_only.png')
-            plt.savefig(graph_filepath_zoom_1_l2_only)
-            print(f"時間軸{zoom_start_1}s-{zoom_end_1}sのL2正規化のみの拡大グラフを {graph_filepath_zoom_1_l2_only} に保存しました。")
-
-
-        # --- 新規グラフ: 時間軸2000秒〜3000秒に拡大 (L2ノルム正規化のみ) ---
-        plt.figure(figsize=(15, 6))
-        plt.suptitle(f'L2-Normalized LNK Model Output Comparison (Data: {data_options}) [Time Axis 2000s-3000s, L2-Normalized Only]', fontsize=16)
-
-        if len(zoom_indices_2) == 0: # zoom_indices_2は既に計算済み
-            print(f"警告: 時間軸 {zoom_start_2}s-{zoom_end_2}s のデータポイントが見つからなかったため、L2正規化のみの拡大グラフは作成されません。")
-        else:
-            ax6 = plt.subplot(1, 1, 1)
-            ax6.plot(time_axis_1000_plus[zoom_indices_2], l2_normalized_Provided_Output[zoom_indices_2], 
-                     label='L2-Normalized Provided Output', alpha=0.7, color='blue') 
-            ax6.plot(time_axis_1000_plus[zoom_indices_2], l2_normalized_calculated_Output_94[zoom_indices_2], 
-                     label='L2-Normalized LNK Model (94-parents.txt)', linestyle='--', alpha=0.7, color='orange')
-            ax6.plot(time_axis_1000_plus[zoom_indices_2], l2_normalized_calculated_Output_03[zoom_indices_2], # Model 2 を赤色で追加
-                     label='L2-Normalized LNK Model (03-params.txt)', linestyle=':', alpha=0.7, color='red')
-            
-            ax6.set_title(f'L2-Normalized Outputs - Time {zoom_start_2}s-{zoom_end_2}s (Not Mean-Centered)')
-            ax6.set_xlabel('Time (s)')
-            ax6.set_ylabel('Normalized Amplitude (L2-norm = 1)')
-            ax6.legend()
-            ax6.grid(True)
-            ax6.set_xlim(zoom_start_2, zoom_end_2)
-
-            plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-            
-            graph_filepath_zoom_2_l2_only = os.path.join(target_result_dir, f'LNK_model_output_comparison_time_{zoom_start_2}s_to_{zoom_end_2}s_l2_norm_only.png')
-            plt.savefig(graph_filepath_zoom_2_l2_only)
-            print(f"時間軸{zoom_start_2}s-{zoom_end_2}sのL2正規化のみの拡大グラフを {graph_filepath_zoom_2_l2_only} に保存しました。")
-
-
-except Exception as e:
-    print(f"グラフ作成中に予期せぬエラーが発生しました: {e}")
-    print("LNK_model_for_plotが正しく動作しているか確認してください。")
-
-print("\nグラフ作成スクリプトが完了しました。")
+    # main関数に設定を渡して実行
+    main(TARGET_CONFIG, TARGET_DIR, TARGET_TAU)

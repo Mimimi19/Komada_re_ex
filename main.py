@@ -7,6 +7,7 @@ import hydra
 from omegaconf import DictConfig
 import subprocess
 from pathlib import Path
+import shutil  # ファイル操作用に追加
 
 # コンポーネントへのパスを通す
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
@@ -21,7 +22,7 @@ def main(cfg: DictConfig):
     
     project_root = hydra.utils.get_original_cwd()
     data_name = cfg.data.name
-    dt = cfg.data.get('dt', 0.0002) # configにない場合はデフォルト値
+    dt = cfg.data.get('dt', 0.0002) 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     
     # データの読み込み
@@ -32,7 +33,7 @@ def main(cfg: DictConfig):
     raw_input = np.genfromtxt(input_file_path)
     raw_output = np.genfromtxt(output_file_path)
 
-    # segment指定の取得 (config.yamlに追加したため cfg.segment でアクセス可能)
+    # segment指定の取得
     segment_duration = cfg.get("segment")
 
     # === MODE A: 全文処理 (Segment指定なし) ===
@@ -70,10 +71,8 @@ def main(cfg: DictConfig):
         temp_dir = base_save_dir / "temp_files"
         temp_dir.mkdir(exist_ok=True)
 
-        # Warm-up長の設定 (時定数 tau 程度が目安)
         warmup_sec = cfg.hyper_params.tau
         
-        # コンポーネントを使用して分割
         manager = SegmentManager(project_root, dt)
         segments = manager.create_segments(raw_input, raw_output, segment_sec, warmup_sec, temp_dir)
         
@@ -87,15 +86,12 @@ def main(cfg: DictConfig):
             
             seg_run_dir = base_save_dir / f"{seg_id}_segment"
             
-            # BaccusModel 実行
-            # trim_I_seconds を渡して、Warm-up区間を評価から除外する
             cmd = [
                 "uv", "run", "python", "src/model/BaccusModel.py",
                 f"data.input_file={seg['input_path']}",
                 f"data.output_file={seg['output_path']}",
                 f"hydra.run.dir={seg_run_dir}",
                 f"hyper_params.trim_I_seconds={trim_sec}",
-                # 高速化設定
                 "optimization.popsize=15",
                 "optimization.maxiter=50"
             ]
@@ -108,9 +104,27 @@ def main(cfg: DictConfig):
                     params = np.genfromtxt(params_file)
                     collected_params.append(params)
                     
+                    # --- 追加機能: 解析用ファイルの保存 ---
+                    # ユーザー指定: "最終エポックの各パラメータと使った範囲の刺激を切り出して保存"
+                    
+                    # 1. 使用した刺激と応答 (Warmup含む実際にモデルに入力された範囲)
+                    shutil.copy(seg['input_path'], seg_run_dir / f"{seg_id}_stimulus.txt")
+                    shutil.copy(seg['output_path'], seg_run_dir / f"{seg_id}_response.txt")
+                    
+                    # 2. 最終パラメータ (params.txt を {id}_params.txt として複製)
+                    shutil.copy(params_file, seg_run_dir / f"{seg_id}_params.txt")
+                    
+                    # 3. 予測結果 (predict.txt を {id}_predict.txt として複製)
+                    predict_file = seg_run_dir / "predict.txt"
+                    if predict_file.exists():
+                        shutil.copy(predict_file, seg_run_dir / f"{seg_id}_predict.txt")
+
+                    print(f"Saved analysis files: {seg_id}_stimulus.txt, {seg_id}_response.txt, etc.")
+
                     # プロット
                     result_config = seg_run_dir / ".hydra" / "config.yaml"
                     plot_result.process_plot(str(result_config), str(seg_run_dir))
+
             except subprocess.CalledProcessError:
                 print(f"Skipping segment {seg_id} due to error.")
                 continue
@@ -125,15 +139,11 @@ def main(cfg: DictConfig):
             print("--- Running Final Verification with Full Data ---")
             final_run_dir = base_save_dir / "final_verification"
             
-            # 中央値検証用ラン (パラメータを渡す仕組みがないため、全データで1回回す)
-            # 本来は median_params を初期値にすべきだが、現状のBaccusModel仕様に合わせて実行
             cmd_final = [
                 "uv", "run", "python", "src/model/BaccusModel.py",
                 f"data.input_file={input_file_path}",
                 f"data.output_file={output_file_path}",
                 f"hydra.run.dir={final_run_dir}",
-                # ここで median_params を渡す仕組みを実装するか、
-                # あるいは BaccusModel側で params.txt があればそれを初期値にする改造が必要
             ]
             subprocess.run(cmd_final, check=True, cwd=project_root)
             
