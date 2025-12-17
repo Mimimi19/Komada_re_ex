@@ -15,13 +15,13 @@ import requests
 from dotenv import load_dotenv
 
 # コンポーネントのインポート
-import src.components.L_LNK as L_LNK
-import src.components.N_LNK as N_LNK
-import src.components.K_baccus as K_LNK
+import components.L_LNK as L_LNK
+import components.N_LNK as N_LNK
+import components.K_baccus as K_LNK
 
 # 目的関数モジュールのインポート (新規追加)
-import src.components.objectives.spearman as obj_spearman
-import src.components.objectives.hybrid as obj_hybrid
+import components.objectives.spearman as obj_spearman
+import components.objectives.hybrid as obj_hybrid
 
 def save_results(data, filepath):
     """
