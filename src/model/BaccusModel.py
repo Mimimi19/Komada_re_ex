@@ -171,10 +171,7 @@ class BaccusOptimizer:
             self.Input = Input_full
             self.Output = Output_full
         
-        base_dir = get_original_cwd()
-        # self.results_dir のパスを修正し、重複した行を削除
-        self.results_dir = os.path.join(base_dir, 'scripts', 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
-        os.makedirs(self.results_dir, exist_ok=True)
+        self.results_dir = os.getcwd()
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
 
     def _calculate_steady_state(self, a, kappa, b1, b2, ka, kfi, kfr, ksi, ksr):

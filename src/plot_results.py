@@ -343,14 +343,14 @@ if __name__ == "__main__":
     # =================================================================
     
     # 1. データ設定ファイル (.yaml) のパス
-    # TARGET_CONFIG = "config/data/Ucb1.yaml"
+    TARGET_CONFIG = "config/data/Ucb1.yaml"
     # TARGET_CONFIG = "config/data/Ucb2.yaml"
-    TARGET_CONFIG = "config/data/ret2p-1.yaml"
+    # TARGET_CONFIG = "config/data/ret2p-1.yaml"
     
     # 2. 学習結果が保存されているディレクトリ
-    # TARGET_DIR = "scripts/cb1/20251217_00"
+    TARGET_DIR = "scripts/cb1/20251217_23"
     # TARGET_DIR = "scripts/cb2/20251213_02"
-    TARGET_DIR = "scripts/ret2p/20251217_14"
+    # TARGET_DIR = "scripts/ret2p/20251217_23"
     
     # 3. 時定数 (Tau)
     TARGET_TAU = 1.0
