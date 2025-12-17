@@ -99,8 +99,8 @@ def main(cfg: DictConfig):
                 f"hydra.run.dir={seg_run_dir}",
                 f"hyper_params.trim_I_seconds={trim_sec}",
                 f"hyper_params.objective_type={objective_type}", # 目的関数を渡す
-                "optimization.popsize=15",
-                "optimization.maxiter=50"
+                "optimization.popsize=300",
+                "optimization.maxiter=200"
             ]
             
             try:
@@ -111,13 +111,11 @@ def main(cfg: DictConfig):
                     params = np.genfromtxt(params_file)
                     collected_params.append(params)
                     
-                    # --- 解析用ファイルの保存 ---
-                    # 1. 使用した刺激と応答 (Warmup含む実際にモデルに入力された範囲)
+                    # 1. 使用した刺激と応答
                     shutil.copy(seg['input_path'], seg_run_dir / f"{seg_id}_stimulus.txt")
                     shutil.copy(seg['output_path'], seg_run_dir / f"{seg_id}_response.txt")
                     
-                    # 2. 最終パラメータの複製
-                    # formatは 'epoch_600_params.txt' と同じく、数値が1列に並んだテキストファイルです
+                    # 2. 最終パラメータ ({id}_params.txt)
                     shutil.copy(params_file, seg_run_dir / f"{seg_id}_params.txt")
                     
                     # 3. 予測結果
@@ -126,7 +124,7 @@ def main(cfg: DictConfig):
                         shutil.copy(predict_file, seg_run_dir / f"{seg_id}_predict.txt")
 
                     print(f"Saved: {seg_id}_params.txt, {seg_id}_stimulus.txt, etc.")
-
+                    
                     # プロット
                     result_config = seg_run_dir / ".hydra" / "config.yaml"
                     plot_result.process_plot(str(result_config), str(seg_run_dir))
