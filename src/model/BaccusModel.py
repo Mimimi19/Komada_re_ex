@@ -11,6 +11,7 @@ from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
+from hydra.core.hydra_config import HydraConfig
 import mlflow
 import requests
 from dotenv import load_dotenv
@@ -171,7 +172,12 @@ class BaccusOptimizer:
             self.Input = Input_full
             self.Output = Output_full
         
-        self.results_dir = os.getcwd()
+        try:
+            # hydra.run.dir で指定されたパスを確実に取得する
+            self.results_dir = HydraConfig.get().runtime.output_dir
+        except Exception:
+            # 万が一Hydra経由でない場合のフォールバック
+            self.results_dir = os.getcwd()
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
 
     def _calculate_steady_state(self, a, kappa, b1, b2, ka, kfi, kfr, ksi, ksr):
