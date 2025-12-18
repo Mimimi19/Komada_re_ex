@@ -16,18 +16,41 @@ from components.segment_manager import SegmentManager
 # src/plot_result.py をインポート
 import plot_result
 
+def get_save_root_name(data_name):
+    """
+    データ名に応じて保存先ディレクトリ名を決定する
+    data=Ucb1    -> Baccus_cb1
+    data=Ucb2    -> Baccus_cb2
+    data=ret2p-1 -> Baccus_ret2p
+    その他       -> Baccus_{data_name}
+    """
+    if "cb1" in data_name:
+        return "Baccus_cb1"
+    elif "cb2" in data_name:
+        return "Baccus_cb2"
+    elif "ret2p" in data_name:
+        return "Baccus_ret2p"
+    else:
+        return f"Baccus_{data_name}"
+
 @hydra.main(config_path="config", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     print("=== Baccus Model Orchestrator Started ===")
     
     project_root = hydra.utils.get_original_cwd()
     data_name = cfg.data.name
+    # dtを取得 (configにない場合はデフォルト値だが、ret2p等はyamlにあるはず)
     dt = cfg.data.get('dt', 0.0002) 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    
+    # 保存先ディレクトリ名の決定
+    save_root_name = get_save_root_name(data_name)
     
     # 目的関数のタイプを取得 (configから)
     objective_type = cfg.hyper_params.get("objective_type", "hybrid")
     print(f"Objective Type: {objective_type}")
+    print(f"Target Directory: scripts/results/{save_root_name}")
+    print(f"Sampling Rate (dt): {dt}") # 確認用ログ
 
     # データの読み込み
     input_file_path = Path(project_root) / cfg.data.input_file
@@ -44,16 +67,20 @@ def main(cfg: DictConfig):
     if segment_duration is None:
         print("\n[Mode: Full Data Processing]")
         
-        save_dir = Path(project_root) / "scripts" / "results" / data_name / timestamp
+        # 保存先: scripts/results/Baccus_xxx/timestamp
+        save_dir = Path(project_root) / "scripts" / "results" / save_root_name / timestamp
         save_dir.mkdir(parents=True, exist_ok=True)
         
         # BaccusModelに渡す引数を構築
+        # ★重要修正: data.dt と data.name を引き継ぐ
         cmd = [
             "uv", "run", "python", "src/model/BaccusModel.py",
             f"data.input_file={input_file_path}",
             f"data.output_file={output_file_path}",
+            f"data.name={data_name}", # データ名を引き継ぐ
+            f"data.dt={dt}",          # dtを引き継ぐ
             f"hydra.run.dir={save_dir}",
-            f"hyper_params.objective_type={objective_type}" # 目的関数を渡す
+            f"hyper_params.objective_type={objective_type}" 
         ]
         
         try:
@@ -72,8 +99,10 @@ def main(cfg: DictConfig):
         segment_sec = float(segment_duration)
         print(f"\n[Mode: Segment Processing] Duration = {segment_sec} sec")
         
-        base_save_dir = Path(project_root) / "scripts" / "segments" / data_name / timestamp
+        # 保存先: scripts/results/Baccus_xxx/timestamp (セグメントもresults配下に統一)
+        base_save_dir = Path(project_root) / "scripts" / "results" / save_root_name / timestamp
         base_save_dir.mkdir(parents=True, exist_ok=True)
+        
         temp_dir = base_save_dir / "temp_files"
         temp_dir.mkdir(exist_ok=True)
 
@@ -90,17 +119,21 @@ def main(cfg: DictConfig):
             print(f"\n--- Processing Segment {seg_id}/{len(segments)} ---")
             print(f"{seg['info']}")
             
+            # 各セグメントのフォルダ
             seg_run_dir = base_save_dir / f"{seg_id}_segment"
             
+            # ★重要修正: data.dt と data.name を引き継ぐ
             cmd = [
                 "uv", "run", "python", "src/model/BaccusModel.py",
                 f"data.input_file={seg['input_path']}",
                 f"data.output_file={seg['output_path']}",
+                f"data.name={data_name}", # データ名を引き継ぐ
+                f"data.dt={dt}",          # dtを引き継ぐ
                 f"hydra.run.dir={seg_run_dir}",
                 f"hyper_params.trim_I_seconds={trim_sec}",
-                f"hyper_params.objective_type={objective_type}", # 目的関数を渡す
-                "optimization.popsize=300",
-                "optimization.maxiter=200"
+                f"hyper_params.objective_type={objective_type}", 
+                "optimization.popsize=300",  # 母集団
+                "optimization.maxiter=200"   # 世代
             ]
             
             try:
@@ -111,20 +144,17 @@ def main(cfg: DictConfig):
                     params = np.genfromtxt(params_file)
                     collected_params.append(params)
                     
-                    # 1. 使用した刺激と応答
+                    # --- 解析用ファイルの保存 ---
                     shutil.copy(seg['input_path'], seg_run_dir / f"{seg_id}_stimulus.txt")
                     shutil.copy(seg['output_path'], seg_run_dir / f"{seg_id}_response.txt")
-                    
-                    # 2. 最終パラメータ ({id}_params.txt)
                     shutil.copy(params_file, seg_run_dir / f"{seg_id}_params.txt")
                     
-                    # 3. 予測結果
                     predict_file = seg_run_dir / "predict.txt"
                     if predict_file.exists():
                         shutil.copy(predict_file, seg_run_dir / f"{seg_id}_predict.txt")
 
-                    print(f"Saved: {seg_id}_params.txt, {seg_id}_stimulus.txt, etc.")
-                    
+                    print(f"Saved analysis files for segment {seg_id}")
+
                     # プロット
                     result_config = seg_run_dir / ".hydra" / "config.yaml"
                     plot_result.process_plot(str(result_config), str(seg_run_dir))
@@ -138,7 +168,7 @@ def main(cfg: DictConfig):
             print("\n--- Calculating Median Parameters ---")
             median_params = np.median(collected_params, axis=0)
             median_save_path = base_save_dir / "median_params.txt"
-            np.savetxt(median_save_path, median_params, fmt='%.6f') # フォーマット指定
+            np.savetxt(median_save_path, median_params, fmt='%.6f')
             
             print("--- Running Final Verification with Full Data ---")
             final_run_dir = base_save_dir / "final_verification"
@@ -147,6 +177,8 @@ def main(cfg: DictConfig):
                 "uv", "run", "python", "src/model/BaccusModel.py",
                 f"data.input_file={input_file_path}",
                 f"data.output_file={output_file_path}",
+                f"data.name={data_name}", # データ名を引き継ぐ
+                f"data.dt={dt}",          # dtを引き継ぐ
                 f"hydra.run.dir={final_run_dir}",
                 f"hyper_params.objective_type={objective_type}"
             ]
