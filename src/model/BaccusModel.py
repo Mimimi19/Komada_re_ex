@@ -349,70 +349,58 @@ class BaccusOptimizer:
             print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # Evaluation
-            correlation = 1.0  # ペナルティ値
-         
+            score = 5.0  # デフォルトペナルティ（大きいほど悪い）
+
             if check == 1:
                 # 配列長の調整
                 current_len = len(A_state)
                 output_aligned = self.Output[:current_len]
-                
+
                 # 先行研究寄り: A_state を出力として扱う
                 model_aligned = A_state
 
-                # スケール差でRMSEが支配されないようにz-score正規化
+                # スケール差でスコアが支配されないように z-score 正規化
                 o_std = np.std(output_aligned)
                 m_std = np.std(model_aligned)
                 if o_std > 1e-9:
                     output_aligned = (output_aligned - np.mean(output_aligned)) / o_std
                 if m_std > 1e-9:
                     model_aligned = (model_aligned - np.mean(model_aligned)) / m_std
-                if len(output_aligned) != len(model_aligned):
-                     min_l = min(len(output_aligned), len(model_aligned))
-                     output_aligned = output_aligned[:min_l]
-                     model_aligned = model_aligned[:min_l]
 
-                # マスク処理
+                if len(output_aligned) != len(model_aligned):
+                    min_l = min(len(output_aligned), len(model_aligned))
+                    output_aligned = output_aligned[:min_l]
+                    model_aligned = model_aligned[:min_l]
+
+                # マスク処理（先頭のトランジェントを除外）
                 mask_seconds = 1.0
                 mask_idx = int(mask_seconds / dt)
 
                 if mask_idx < len(output_aligned):
-                    # スライスしたデータ同士で相関を計算
                     output_eval = output_aligned[mask_idx:]
                     model_eval = model_aligned[mask_idx:]
+
                     # --- 目的関数の選択 ---
                     if self.objective_type == 'hybrid':
-                        o_bp = obj_hybrid._bandpass_zero_phase(
-                            output_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
+                        # 戻り値は「最小化すべきスコア」
+                        score = obj_hybrid.calculate(
+                            output_eval, model_eval,
+                            dt=dt,
+                            use_diff_hp=True,
+                            w_band=2.0
                         )
-                        m_bp = obj_hybrid._bandpass_zero_phase(
-                            model_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
-                        )
-
-                        # Spearmanの「最小化スコア」は spearman.py を再利用（score = -rho）
-                        score = obj_spearman.calculate(o_bp, m_bp)
-                        corr_value = -score  # ← ログ表示/MLflow用（最大化したい値）
-
-                        # 追加の“形状整合”を弱く入れたい場合（任意）
-                        #   元の hybrid（RMSE+Pearson+band penalty）も少しだけ混ぜるなら：
-                        # aux = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
-                        # score = score + 0.1 * aux  # 0.05～0.2くらいで
-
                     else:
-                        # 互換：通常のSpearman（全帯域）
+                        # Spearman順位相関（実装が -rho を返すなら最小化に整合）
                         score = obj_spearman.calculate(output_eval, model_eval)
-                        corr_value = -score
-                try:
-                    mlflow.log_metric("corr_band_4_30_spearman", float(corr_value))
-                except Exception:
-                    pass
-
                 else:
-                    correlation = 5.0 # 長さ不足時のペナルティ
+                    score = 5.0  # 長さ不足時のペナルティ
             else:
                 self.failed_lnk_model_runs += 1
-                correlation = 5.0 # 計算失敗時のペナルティ
-                
+                score = 5.0  # 計算失敗時のペナルティ
+
+            # この関数の返り値は最小化対象（score）
             correlation = score
+
 
             
             self.current_epoch_best_fun_value = correlation
