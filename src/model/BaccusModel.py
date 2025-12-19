@@ -381,20 +381,39 @@ class BaccusOptimizer:
                     model_eval = model_aligned[mask_idx:]
                     # --- 目的関数の選択 ---
                     if self.objective_type == 'hybrid':
-                        # RMSEとピアソン相関のハイブリッド (デフォルト)
-                        # 戻り値は「最小化すべきスコア」
-                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
+                        o_bp = obj_hybrid._bandpass_zero_phase(
+                            output_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
+                        )
+                        m_bp = obj_hybrid._bandpass_zero_phase(
+                            model_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
+                        )
 
+                        # Spearmanの「最小化スコア」は spearman.py を再利用（score = -rho）
+                        score = obj_spearman.calculate(o_bp, m_bp)
+                        corr_value = -score  # ← ログ表示/MLflow用（最大化したい値）
+
+                        # 追加の“形状整合”を弱く入れたい場合（任意）
+                        #   元の hybrid（RMSE+Pearson+band penalty）も少しだけ混ぜるなら：
+                        # aux = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
+                        # score = score + 0.1 * aux  # 0.05～0.2くらいで
 
                     else:
-                        # Spearman順位相関
-                        correlation = obj_spearman.calculate(output_eval, model_eval)
-                        
+                        # 互換：通常のSpearman（全帯域）
+                        score = obj_spearman.calculate(output_eval, model_eval)
+                        corr_value = -score
+                try:
+                    mlflow.log_metric("corr_band_4_30_spearman", float(corr_value))
+                except Exception:
+                    pass
+
                 else:
                     correlation = 5.0 # 長さ不足時のペナルティ
             else:
                 self.failed_lnk_model_runs += 1
                 correlation = 5.0 # 計算失敗時のペナルティ
+                
+            correlation = score
+
             
             self.current_epoch_best_fun_value = correlation
 
