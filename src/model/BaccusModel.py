@@ -413,7 +413,7 @@ class BaccusOptimizer:
         """
         
         self.epoch_counter += 1
-        current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
+        current_best_correlation_value = self.lnk_model(xk, save_states=False) 
         
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)
