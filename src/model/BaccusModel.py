@@ -383,7 +383,8 @@ class BaccusOptimizer:
                     if self.objective_type == 'hybrid':
                         # RMSEとピアソン相関のハイブリッド (デフォルト)
                         # 戻り値は「最小化すべきスコア」
-                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True)
+                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
+
 
                     else:
                         # Spearman順位相関
