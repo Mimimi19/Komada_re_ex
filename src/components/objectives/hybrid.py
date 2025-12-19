@@ -1,6 +1,7 @@
 # src/components/objectives/hybrid.py
 import numpy as np
 from scipy.stats import pearsonr
+from scipy.signal import butter, filtfilt
 
 def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
     """シンプルな移動平均ローパス。
@@ -11,12 +12,42 @@ def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
     kernel = np.ones(win, dtype=np.float64) / float(win)
     return np.convolve(x, kernel, mode="same")
 
+def _bandpass_zero_phase(x: np.ndarray, dt: float, low_hz: float, high_hz: float, order: int = 4) -> np.ndarray:
+    """
+    ゼロ位相バンドパス（butter + filtfilt）
+    dt が無い/不正な場合や、設計不能な場合はそのまま返す。
+    """
+    if dt is None or dt <= 0:
+        return x
+    fs = 1.0 / dt
+    nyq = 0.5 * fs
+
+    # 正規化周波数（0<low<high<nyq）
+    low = low_hz / nyq
+    high = high_hz / nyq
+    if not (0 < low < high < 1.0):
+        return x
+
+    # filtfilt が短すぎる系列で落ちるのを避ける（ざっくり安全策）
+    if len(x) < max(32, 3 * (order + 1)):
+        return x
+
+    b, a = butter(order, [low, high], btype="band")
+    return filtfilt(b, a, x)
+
+
 def calculate(output_eval, model_eval, dt=None,
               lp_sec=0.125,   # 低域抽出用のローパス窓(秒)
               w_low=1.0,     # 低周波RMSEの重み
               w_high=3.0,    # 高周波RMSEの重み
               w_corr=0.5,    # 相関の重み（従来の 0.5 を踏襲）
-              use_diff_hp=False  # True: 差分で高域を見る（より攻める）
+              use_diff_hp=False, # True: 差分で高域を見る（より攻める）
+            #   4–30Hz band
+              use_band_spearman=True,
+              bp_low_hz=4.0,
+              bp_high_hz=30.0,
+              bp_order=4,
+              w_band=1.0
               ):
     """
     RMSEとピアソン相関を組み合わせたハイブリッドスコア
@@ -68,12 +99,30 @@ def calculate(output_eval, model_eval, dt=None,
         # 2. Pearson Correlation: 形の類似度
         # 線形な関係性を見るため、正規分布でなくとも「波形の類似度」の指標としては機能する
         r_val, _ = pearsonr(output_eval, model_eval)
+        
+        band_penalty = 0.0
+        if use_band_spearman and (dt is not None) and (dt > 0):
+            # 4–30Hz に通して、順位一致を強制
+            o_bp = _bandpass_zero_phase(output_eval.astype(np.float64), dt, bp_low_hz, bp_high_hz, order=bp_order)
+            m_bp = _bandpass_zero_phase(model_eval.astype(np.float64), dt, bp_low_hz, bp_high_hz, order=bp_order)
+
+            # 定数系列だと spearmanr が nan になるので回避
+            if np.std(o_bp) > 1e-9 and np.std(m_bp) > 1e-9:
+                rho_band, _ = spearmanr(o_bp, m_bp)
+                if np.isfinite(rho_band):
+                    # 最小化なので (1 - rho) を足す
+                    band_penalty = w_band * (1.0 - float(rho_band))
+                else:
+                    band_penalty = w_band * 1.0
+            else:
+                band_penalty = w_band * 1.0
 
         # --- 目的関数 ---
         # score = (低域RMSE) + (高域RMSE) - (重み * 相関)
         # 相関が1に近づくほどスコアが下がり、RMSEが0に近づくほどスコアが下がる
 
-        score = (w_low * rmse_low) + (w_high * rmse_high) - (w_corr * r_val)
+        score = (w_low * rmse_low) + (w_high * rmse_high) - (w_corr * r_val) + band_penalty
+        
 
     else:
         score = 10.0 # 強いペナルティ
