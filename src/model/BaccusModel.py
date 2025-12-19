@@ -315,6 +315,7 @@ class BaccusOptimizer:
                     g_short = g_short / g_short_std
 
                 # 合成（最小変更：単純和）
+                # g_t = g_long + beta_short*g_short # beta_short を導入しても良いが、まずは単純和で試す
                 g_t = g_long + g_short
             else:
                 g_t = g_long
@@ -382,7 +383,8 @@ class BaccusOptimizer:
                     if self.objective_type == 'hybrid':
                         # RMSEとピアソン相関のハイブリッド (デフォルト)
                         # 戻り値は「最小化すべきスコア」
-                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt)
+                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True)
+
                     else:
                         # Spearman順位相関
                         correlation = obj_spearman.calculate(output_eval, model_eval)
@@ -413,7 +415,7 @@ class BaccusOptimizer:
         """
         
         self.epoch_counter += 1
-        current_best_correlation_value = self.lnk_model(xk, save_states=False) 
+        current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
         
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)

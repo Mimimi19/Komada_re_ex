@@ -12,9 +12,9 @@ def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
     return np.convolve(x, kernel, mode="same")
 
 def calculate(output_eval, model_eval, dt=None,
-              lp_sec=0.25,   # 低域抽出用のローパス窓(秒)
+              lp_sec=0.125,   # 低域抽出用のローパス窓(秒)
               w_low=1.0,     # 低周波RMSEの重み
-              w_high=1.0,    # 高周波RMSEの重み
+              w_high=3.0,    # 高周波RMSEの重み
               w_corr=0.5,    # 相関の重み（従来の 0.5 を踏襲）
               use_diff_hp=False  # True: 差分で高域を見る（より攻める）
               ):
@@ -39,7 +39,8 @@ def calculate(output_eval, model_eval, dt=None,
 
         # --- (A) 低周波/高周波に分解 ---
         if dt is not None and dt > 0:
-            win = int(lp_sec / dt)
+            win = max(3, int(lp_sec / dt))
+
         else:
             # dtがない場合は安全に「長さに応じた窓」にする（過度に大きくしない）
             win = max(3, int(0.01 * len(output_eval)))  # 長さの1%程度
