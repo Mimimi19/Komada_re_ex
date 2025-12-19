@@ -681,16 +681,16 @@ class BaccusOptimizer:
 
         # 戻り値受け取り変更
         res_tuple = self.lnk_model(optimal_params, save_states=True)
-        
-        if len(res_tuple) == 5:
+
+        if isinstance(res_tuple, tuple) and len(res_tuple) == 5:
             _, r_final, a_final, i1_final, i2_final = res_tuple
             self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final)
             mlflow.log_artifacts(self.results_dir, artifact_path="results")
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
             print(f"最終的な相関係数: {optimal_correlation:.4f}")
-            # 失敗した場合でも、最終的な相関係数だけは記録しておく
             mlflow.log_metric("final_correlation_on_failure", optimal_correlation)
+
 
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(cfg: DictConfig):

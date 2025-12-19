@@ -1,6 +1,6 @@
 # src/components/objectives/hybrid.py
 import numpy as np
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr 
 from scipy.signal import butter, filtfilt
 
 def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
