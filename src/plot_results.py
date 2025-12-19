@@ -349,7 +349,7 @@ if __name__ == "__main__":
     
     # 2. 学習結果が保存されているディレクトリ
     # TARGET_DIR = "scripts/cb1/20251218_1012"
-    TARGET_DIR = "scripts/cb2/20251218_1744/1_segment"
+    TARGET_DIR = "scripts/ret2p/20251218_1906/1_segment"
     # TARGET_DIR = "scripts/ret2p/20251217_23"
     
     # 3. 時定数 (Tau)

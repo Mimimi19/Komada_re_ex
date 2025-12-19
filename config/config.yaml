@@ -15,7 +15,7 @@ hyper_params:
   # dt: 0.0002 # 1/5000 s
 
   # 選択肢: spearman, hybrid.
-  objective_type: "hybrid"  
+  objective_type: "hybrid"
 
   #使用データのトリミング秒数
   trim_I_seconds: 0.0 # s
@@ -25,8 +25,12 @@ hyper_params:
   # J: 15
   # カルシウム応答は約0.5〜1.0秒の履歴が必要なため、40〜60程度まで増やす、baccusはアレイを使ってたから早い
   J: 15
+
+  # 大局（低周波）用の窓長（秒）
   tau: 1.0 # s 前任者より
 
+  # 局所（高周波）用の短窓（秒）
+  tau_short: 0.15 # s （例: 150ms）
 
   # true: I2, ksi, ksr を最適化対象に含める
   # false: I2, ksi, ksr を強制的に 0.0 にする
@@ -48,16 +52,13 @@ hyper_params:
       kfr: [1e-6, 10.0] # kfr: 論文で「正であること」と定義。上限 100.0 -> 10.0 に変更
       ksi: [1e-6, 10.0] # ksi: 論文で「正であること」と定義。図5D(0.3-6)を参考に上限を設定。
       ksr: [1e-6, 1.0] # ksr: 論文で「正」かつ「1.0 s^-1 より遅い(小さい)」と定義。
-      w_gain: [0.0, 100.0]  # 生成ゲイン
-      w_decay: [0.0, 100.0] # 減衰速度
-    # === InitialStates は定常状態計算により自動設定するためコメントアウト ===
+
+    #InitialStates は定常状態計算により自動設定する
     # InitialStates:
     #   p_R: [0.0, 1.0]
     #   p_A: [0.0, 1.0]
     #   p_I1: [0.0, 1.0]
     #   p_I2: [0.0, 1.0] # use_I2: false の場合、(0.0, 0.0) に上書きされます
-
-
 
 # 差分化進化法の設定
 optimization:

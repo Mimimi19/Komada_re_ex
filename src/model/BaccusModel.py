@@ -230,7 +230,8 @@ class BaccusOptimizer:
         try:
             hp = self.cfg.hyper_params
             dt = self.cfg.data.dt
-            tau = hp.tau
+            tau = hp.tau  # 大局（低周波）用
+            tau_short = hp.get('tau_short', None)  # 局所（高周波）用（無ければNone）
             J = self.J
             
             # --- パラメータのアンパッキング (順番に注意) ---
@@ -246,11 +247,6 @@ class BaccusOptimizer:
             kfr_kinetic = x[J+7]
             ksi_kinetic = x[J+8]
             ksr_kinetic = x[J+9]
-            # シナプス後電流のパラメータ
-            w_gain = x[J+10]
-            w_decay = x[J+11]
-            
-            # ※ ここで p_R, p_A 等の初期値パラメータのアンパッキングは削除されました
             
             if not self.use_I2:
                 ksi_kinetic = 0.0
@@ -262,25 +258,60 @@ class BaccusOptimizer:
                 a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear,
                 ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic
             )
-            
-            # フィルタの有効長 (tau) に必要なポイント数だけを計算します。
+            # Linear Model
+            # --- 大局（低周波）用の長窓 ---
             filter_points = int(tau / dt) + 1  # +1 は余裕を持たせるため
-            
+
             # カーネル生成 (長さは filter_points のみ)
             linear_filter_kernel, _ = L_LNK.main(alphas, delta, filter_points, dt, tau)
-            
-            #畳み込みとサイズ調整
+
+            # 畳み込みとサイズ調整
             g_full = fftconvolve(self.Input, linear_filter_kernel, mode='full')
-            
+
             # フィルタによる位相遅れを補正するためのシフト量
-            shift_idx = int(tau / dt) 
-            
+            shift_idx = int(tau / dt)
+
             # データ長に合わせて切り出し
             if len(g_full) > shift_idx + len(self.Input):
-                g_t = g_full[shift_idx : shift_idx + len(self.Input)]
+                g_long = g_full[shift_idx : shift_idx + len(self.Input)]
             else:
                 # 万が一長さが足りない場合のフォールバック（後ろをゼロ埋めなど）
-                g_t = g_full[:len(self.Input)]
+                g_long = np.zeros(len(self.Input))
+                take = max(0, min(len(g_full) - shift_idx, len(self.Input)))
+                if take > 0:
+                    g_long[:take] = g_full[shift_idx:shift_idx+take]
+
+            # 正規化（飽和回避）。長窓は大局の形を担う
+            g_long_std = np.std(g_long)
+            if g_long_std > 1e-9:
+                g_long = g_long / g_long_std
+
+            # --- 局所（高周波）用の短窓（任意） ---
+            # tau_short が設定されている場合のみ、短窓フィルタも同時に使う
+            if tau_short is not None and tau_short > 0:
+                filter_points_s = int(tau_short / dt) + 1
+                linear_filter_kernel_s, _ = L_LNK.main(alphas, delta, filter_points_s, dt, tau_short)
+
+                g_full_s = fftconvolve(self.Input, linear_filter_kernel_s, mode='full')
+                shift_idx_s = int(tau_short / dt)
+
+                if len(g_full_s) > shift_idx_s + len(self.Input):
+                    g_short = g_full_s[shift_idx_s : shift_idx_s + len(self.Input)]
+                else:
+                    g_short = np.zeros(len(self.Input))
+                    take_s = max(0, min(len(g_full_s) - shift_idx_s, len(self.Input)))
+                    if take_s > 0:
+                        g_short[:take_s] = g_full_s[shift_idx_s:shift_idx_s+take_s]
+
+                # 正規化（飽和回避）。短窓は局所の細部を担う
+                g_short_std = np.std(g_short)
+                if g_short_std > 1e-9:
+                    g_short = g_short / g_short_std
+
+                # 合成（最小変更：単純和）
+                g_t = g_long + g_short
+            else:
+                g_t = g_long
 
             # これがないと g_t が ±100 になり、非線形関数が飽和する
             g_std = np.std(g_t)
@@ -295,14 +326,13 @@ class BaccusOptimizer:
                 print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
                 penalty_val = 10.0 # ペナルティを強化 (1.0 -> 10.0)
                 if save_states:
-                    return penalty_val, None, None, None, None, None
+                    return penalty_val, None, None, None, None
                 return penalty_val
             
             # Kinetic Model 
-            R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
+            R_state, A_state, I1_state, I2_state, check = K_LNK.main(
                 len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
-                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, 
-                w_gain, w_decay,
+                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
                 label=f"LNK_run {self.total_lnk_model_runs}"
             )
             
@@ -316,12 +346,19 @@ class BaccusOptimizer:
          
             if check == 1:
                 # 配列長の調整
-                current_len = len(W_state)
+                current_len = len(A_state)
                 output_aligned = self.Output[:current_len]
                 
-                #DE_Simulation準拠で、電流Wは負の相関を持つため反転させる
-                model_aligned = -1.0 * W_state 
+                # 先行研究寄り: A_state を出力として扱う
+                model_aligned = A_state
 
+                # スケール差でRMSEが支配されないようにz-score正規化
+                o_std = np.std(output_aligned)
+                m_std = np.std(model_aligned)
+                if o_std > 1e-9:
+                    output_aligned = (output_aligned - np.mean(output_aligned)) / o_std
+                if m_std > 1e-9:
+                    model_aligned = (model_aligned - np.mean(model_aligned)) / m_std
                 if len(output_aligned) != len(model_aligned):
                      min_l = min(len(output_aligned), len(model_aligned))
                      output_aligned = output_aligned[:min_l]
@@ -339,7 +376,7 @@ class BaccusOptimizer:
                     if self.objective_type == 'hybrid':
                         # RMSEとピアソン相関のハイブリッド (デフォルト)
                         # 戻り値は「最小化すべきスコア」
-                        correlation = obj_hybrid.calculate(output_eval, model_eval)
+                        correlation = obj_hybrid.calculate(output_eval, model_eval, dt=dt)
                     else:
                         # Spearman順位相関
                         correlation = obj_spearman.calculate(output_eval, model_eval)
@@ -353,7 +390,7 @@ class BaccusOptimizer:
             self.current_epoch_best_fun_value = correlation
 
             if save_states:
-                return correlation, R_state, A_state, I1_state, I2_state, W_state
+                return correlation, R_state, A_state, I1_state, I2_state
             else:
                 return correlation
 
@@ -383,7 +420,6 @@ class BaccusOptimizer:
             **{f'L{i+1}': xk[i] for i in range(self.J)},
             'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
             'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
-            'w_gain': xk[self.J+10], 'w_decay': xk[self.J+11]
             # p_R, p_A 等はここには含まれない
         }
 
@@ -409,7 +445,7 @@ class BaccusOptimizer:
         print(f"\r\033[K", end='')
         tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
 
-    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, W_state):
+    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
         """
         最終的な最適化結果を保存します。
         """
@@ -432,7 +468,7 @@ class BaccusOptimizer:
             param_keys = [
                 'delta', 'a', 'kappa', 'b1', 'b2', 
                 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-                'w_gain', 'w_decay'
+                
             ]
             
             for key in param_keys:
@@ -478,9 +514,7 @@ class BaccusOptimizer:
             save_results(R_state, os.path.join(state_dir, 'R_state.txt'))
             save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
             save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
-            save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
-            save_results(W_state, os.path.join(state_dir, 'W_state.txt'))
-            
+            save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))            
             print("すべての保存処理が完了しました。")
             
         except Exception as e:
@@ -493,8 +527,8 @@ class BaccusOptimizer:
         # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
         print("Numba JITコンパイラのウォームアップ中...")
         try:
-            # ダミーのパラメータ配列 (長さ: J + 12) を作成
-            x_dummy = np.ones(self.J + 12) 
+            # ダミーのパラメータ配列 (長さ: J + 10) を作成
+            x_dummy = np.ones(self.J + 10) 
             # 目的関数を一度だけ実行して、コンパイルを強制する
             self.lnk_model(x_dummy, save_states=False)
             print("ウォームアップ完了。最適化を開始します。")
@@ -523,9 +557,7 @@ class BaccusOptimizer:
                 tuple(pb.Kinetics.kfr),
                 tuple(pb.Kinetics.ksi),
                 tuple(pb.Kinetics.ksr),
-                # ★ 追加されたパラメータの範囲
-                tuple(pb.Kinetics.w_gain),
-                tuple(pb.Kinetics.w_decay),
+                # （シナプス後電流を廃止）
                 # 初期状態 p_R, p_A, p_I1, p_I2 は削除
             ])
         except Exception as e:
@@ -542,8 +574,7 @@ class BaccusOptimizer:
             # p_I2 の固定処理は不要になりました
 
         param_names = [f'L{i+1}' for i in range(self.J)] + [
-            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-            'w_gain', 'w_decay' # p_R, p_A... 削除
+            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
         ]
 
         #MLflowに記録するための辞書を作成
@@ -641,11 +672,10 @@ class BaccusOptimizer:
 
         # 戻り値受け取り変更
         res_tuple = self.lnk_model(optimal_params, save_states=True)
-        # res_tuple: (corr, R, A, I1, I2, W)
         
-        if len(res_tuple) == 6:
-            _, r_final, a_final, i1_final, i2_final, w_final = res_tuple
-            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final, w_final)
+        if len(res_tuple) == 5:
+            _, r_final, a_final, i1_final, i2_final = res_tuple
+            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final)
             mlflow.log_artifacts(self.results_dir, artifact_path="results")
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
