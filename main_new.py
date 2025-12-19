@@ -1,17 +1,17 @@
-# main.py (cluster/ROI batch runner)
+# main_new.py (cluster/ROI batch runner)
 # ------------------------------------------------------------
 # - response_data_repeat_1.txt (lchirp_avg: [samples, rois]) を ROIごとに分割
 # - cluster_idx.txt に従い、clusterごとのディレクトリに保存
 # - 各 ROI について BaccusModel 最適化を実行し、結果を
-#   scripts/results/Baccus_ret2pMat/cluster_{c}/roi_{i}/
+#   scripts/results/Baccus_ret2p/cluster_{c}/roi_{i}/
 #   に集約
 # - 学習後に plot_results.py を自動実行して可視化も保存
 #
 # 使い方:
-#   uv run main.py
-#   uv run main.py --stim data/ret2p/chirp_stim_64Hz_bilinear.txt \
-#                  --resp-mat data/ret2pMat/response_data_repeat_1.txt \
-#                  --cluster-idx data/ret2pMat/cluster_idx.txt \
+#   uv run main_new.py
+#   uv run main_new.py --stim data/ret2p/chirp_stim_64Hz_bilinear.txt \
+#                  --resp-mat data/ret2p/response_data_repeat_1.txt \
+#                  --cluster-idx data/ret2p/cluster_idx.txt \
 #                  --dt 0.015625 \
 #                  --out-root scripts/results/Baccus_ret2pMat
 #
