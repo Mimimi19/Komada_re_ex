@@ -289,8 +289,14 @@ class BaccusOptimizer:
             # --- 局所（高周波）用の短窓（任意） ---
             # tau_short が設定されている場合のみ、短窓フィルタも同時に使う
             if tau_short is not None and tau_short > 0:
+                
                 filter_points_s = int(tau_short / dt) + 1
-                linear_filter_kernel_s, _ = L_LNK.main(alphas, delta, filter_points_s, dt, tau_short)
+                #短窓は点数が少ないので、使える基底数を制限する
+                J_eff_s = min(len(alphas), filter_points_s)
+                alphas_s = alphas[:J_eff_s]
+
+                linear_filter_kernel_s, _ = L_LNK.main(alphas_s, delta, filter_points_s, dt, tau_short)
+
 
                 g_full_s = fftconvolve(self.Input, linear_filter_kernel_s, mode='full')
                 shift_idx_s = int(tau_short / dt)
