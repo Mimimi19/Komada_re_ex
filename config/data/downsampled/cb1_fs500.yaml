@@ -1,0 +1,4 @@
+name: cb1
+input_file: config/data/downsampled/wn_0.0002s_fs500.txt
+output_file: config/data/downsampled/average80-86_fs500.txt
+dt: 0.002

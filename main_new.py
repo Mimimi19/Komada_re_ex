@@ -21,6 +21,15 @@
 #   を呼びます。
 # - response_data_repeat_1.txt の shape は (#samples, #rois) を想定。
 #   逆の場合は --transpose を付けてください。
+
+# 途中で止まった「ROI 2000」から再開
+# uv run main_new.py --resume-roi ８ --skip-done
+
+# 「cluster 9だけ」回しつつ、途中から再開
+# uv run main_new.py --only-cluster 9 --resume-roi 2000 --skip-done
+
+# すでに終わってるROIは全部飛ばして続きだけやる（最も便利）
+# uv run main_new.py --skip-done
 # ------------------------------------------------------------
 
 import argparse
@@ -74,6 +83,7 @@ def run_one_roi(
     plot_script: Path,
     extra_overrides: list[str],
     dry_run: bool,
+    skip_done: bool,
 ) -> None:
     """
     1 ROI を学習→plot まで回す。
@@ -83,6 +93,12 @@ def run_one_roi(
       - roi_dir 以下に hydra.run.dir を固定して BaccusModel の成果物
       - roi_dir/validation/* (plot_results.py が吐く)
     """
+    # resume/skip support
+    done_flag = roi_dir / "DONE.txt"
+    if skip_done and done_flag.exists():
+        print(f"[SKIP] DONE exists: {done_flag}")
+        return
+
     roi_dir.mkdir(parents=True, exist_ok=True)
 
     # ROI専用データを書き出し
@@ -122,6 +138,12 @@ def run_one_roi(
 
     subprocess.run(cmd, check=True)
 
+    # mark done (BaccusModel finished successfully)
+    try:
+        done_flag.write_text("DONE\n", encoding="utf-8")
+    except Exception:
+        pass
+
     # plot_results.py 実行（結果 dir を渡して自動保存）
     # 既存 plot_results.py は (results_dir, data_config_path) を argv で受ける想定
     plot_cmd = [
@@ -148,6 +170,10 @@ def main():
                     help="response_data_repeat_1.txt が (#rois, #samples) なら付ける")
     ap.add_argument("--roi-start", type=int, default=1, help="ROI index (1-based) start")
     ap.add_argument("--roi-end", type=int, default=-1, help="ROI index (1-based) end (inclusive). -1 は最後まで")
+    ap.add_argument("--resume-roi", type=int, default=-1,
+                    help="途中で止まった場合の再開位置（1-based ROI）。指定すると --roi-start を上書き")
+    ap.add_argument("--skip-done", action="store_true",
+                    help="roi_dir に DONE.txt がある場合はスキップして次へ")
     ap.add_argument("--only-cluster", type=str, default="",
                     help="例: '9,10' のように指定するとそのクラスタのみ回す")
     ap.add_argument("--max-rois-per-cluster", type=int, default=-1,
@@ -205,6 +231,11 @@ def main():
     roi_start = max(1, args.roi_start)
     roi_end = n_rois if args.roi_end == -1 else min(n_rois, args.roi_end)
 
+    # resume support (1-based ROI)
+    if args.resume_roi is not None and args.resume_roi != -1:
+        roi_start = max(1, int(args.resume_roi))
+        print(f"[RESUME] resume_roi={roi_start} (1-based)")
+
     only_clusters = None
     if args.only_cluster.strip():
         only_clusters = set()
@@ -261,6 +292,7 @@ def main():
             plot_script=plot_script,
             extra_overrides=args.extra_override,
             dry_run=args.dry_run,
+            skip_done=args.skip_done,
         )
 
     print("\n=== DONE ===")

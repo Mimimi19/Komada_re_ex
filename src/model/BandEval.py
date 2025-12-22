@@ -205,7 +205,7 @@ def main():
 
     # A) data config（BaccusModel と同形式の yaml）
     USE_DATA_CONFIG = True
-    DATA_CONFIG_PATH = "config/data/ret2p-1.yaml"  # input_file, output_file, dt を含む想定
+    DATA_CONFIG_PATH = "config/data/Ucb1.yaml"  # input_file, output_file, dt を含む想定
 
     # B) 直指定（USE_DATA_CONFIG=False の場合）
     # INPUT_FILE = "data/ret2p/chirp_stim_64Hz_bilinear.txt"
@@ -213,7 +213,7 @@ def main():
     # DT = 0.015625
 
     # 予測（predict.txt）
-    PREDICT_FILE = "scripts/ret2p/20251219_2302/validation/predict.txt"
+    PREDICT_FILE = "scripts/cb1/20251219_1954/validation/predict.txt"
 
     # 帯域（例：0.5Hz未満を切る & 30Hz超を切る）
     HP_HZ = 0.5

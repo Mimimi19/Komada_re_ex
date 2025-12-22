@@ -356,6 +356,43 @@ def main(data_config_path, results_dir, tau=1.0):
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "detailed_analysis_Astate.png"))
     print("グラフ保存完了")
+    
+        # ==========================================================
+    # 3秒ごとの拡大図（Final Responseのみ）
+    # ==========================================================
+    win_sec = 3.0
+    win_len = int(win_sec / dt)
+    n_win = int(len(time_axis) / win_len)
+
+    fig_h = 2.5 * n_win
+    fig, axes = plt.subplots(n_win, 1, figsize=(18, fig_h), sharey=True)
+
+    if n_win == 1:
+        axes = [axes]
+
+    for i in range(n_win):
+        s = i * win_len
+        e = min((i + 1) * win_len, len(time_axis))
+
+        t_seg = time_axis[s:e]
+        exp_seg = Output_exp[s:e]
+        pred_seg = masked_pre[s:e]
+
+        ax = axes[i]
+        ax.plot(t_seg, exp_seg, color='black', alpha=0.6, linewidth=1.5, label='Experiment')
+        ax.plot(t_seg, pred_seg, color='red', alpha=0.8, linewidth=1.5, label='Model')
+
+        ax.set_title(f'{i*win_sec:.0f}–{(i+1)*win_sec:.0f} s', fontsize=10)
+        ax.grid(alpha=0.4)
+
+        if i == 0:
+            ax.legend(loc='upper right')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "detailed_analysis_Astate_magnificant.png"))
+    plt.close()
+    print("拡大プロット保存完了: detailed_analysis_Astate_magnificant.png")
+
 
 if __name__ == "__main__":
     # =================================================================
