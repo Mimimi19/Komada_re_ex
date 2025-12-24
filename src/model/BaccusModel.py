@@ -388,10 +388,10 @@ class BaccusOptimizer:
                     # score は「最小化」なので基本 -rho を返す
                     if self.objective_type == "band_main_only":
                         # 4–30 Hz
-                        o_bp = obj_hybrid._bandpass_zero_phase(
+                        o_bp = obj_hybrid._bandpass(
                             output_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
                         )
-                        m_bp = obj_hybrid._bandpass_zero_phase(
+                        m_bp = obj_hybrid._bandpass(
                             model_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
                         )
                         score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
@@ -399,10 +399,10 @@ class BaccusOptimizer:
 
                     elif self.objective_type == "band_low_only":
                         # 0.5–4 Hz
-                        o_bp = obj_hybrid._bandpass_zero_phase(
+                        o_bp = obj_hybrid._bandpass(
                             output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
                         )
-                        m_bp = obj_hybrid._bandpass_zero_phase(
+                        m_bp = obj_hybrid._bandpass(
                             model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
                         )
                         score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
@@ -410,10 +410,10 @@ class BaccusOptimizer:
 
                     elif self.objective_type == "band_full":
                         # 0.5–30 Hz（あなたの BandEval と整合）
-                        o_bp = obj_hybrid._bandpass_zero_phase(
+                        o_bp = obj_hybrid._bandpass(
                             output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
                         )
-                        m_bp = obj_hybrid._bandpass_zero_phase(
+                        m_bp = obj_hybrid._bandpass(
                             model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
                         )
                         score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
