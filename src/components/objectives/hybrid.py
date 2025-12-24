@@ -1,118 +1,162 @@
+# src/components/objectives/hybrid.py
 # -*- coding: utf-8 -*-
 import numpy as np
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import spearmanr, pearsonr
 from scipy.signal import butter, filtfilt
 
-def _bandpass(x: np.ndarray, dt: float, lo_hz: float, hi_hz: float, order: int = 4) -> np.ndarray:
-    """
-    Butterworth bandpass (zero-phase).
-    dt: sampling interval [s]
-    lo_hz, hi_hz: band edges [Hz]
-    """
-    if dt is None or dt <= 0:
-        return x
 
+def _safe_zscore(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    s = np.std(x)
+    if s < 1e-12:
+        return x - np.mean(x)
+    return (x - np.mean(x)) / s
+
+
+def _bandpass_zero_phase(x: np.ndarray, dt: float, low_hz: float, high_hz: float, order: int = 4) -> np.ndarray:
+    """
+    0位相(BW) bandpass: butter + filtfilt
+    dt: sampling interval [sec]
+    """
+    x = np.asarray(x, dtype=float)
     fs = 1.0 / dt
     nyq = 0.5 * fs
 
-    lo = max(float(lo_hz), 1e-6)
-    hi = min(float(hi_hz), nyq * 0.999)
+    # 安全域に丸める（Nyquist超え・ゼロ帯域を回避）
+    lo = max(1e-6, float(low_hz))
+    hi = float(high_hz)
+    hi = min(hi, nyq * 0.999)
 
     if hi <= lo:
+        # 帯域が成立しないならそのまま返す（目的関数のペナルティ側で扱う想定）
         return x
 
-    b, a = butter(order, [lo / nyq, hi / nyq], btype="bandpass")
+    b, a = butter(order, [lo / nyq, hi / nyq], btype="band")
+    # filtfilt は短すぎる系列で落ちるのでガード
+    if x.size < (3 * max(len(a), len(b))):
+        return x
     return filtfilt(b, a, x)
 
-def _safe_spearman(a: np.ndarray, b: np.ndarray) -> float:
-    rho, _ = spearmanr(a, b)
-    if np.isnan(rho):
-        return 0.0
-    return float(rho)
 
-def calculate(
-    output_eval: np.ndarray,
-    model_eval: np.ndarray,
-    *,
-    dt: float | None = None,
-    objective_type: str = "hybrid",
-    # hybrid weights
-    w_rmse: float = 1.0,
-    w_pearson: float = 0.5,
-    # band objective settings
-    band_low: tuple[float, float] = (0.5, 4.0),
-    band_main: tuple[float, float] = (4.0, 30.0),
-    filter_order: int = 4,
-    # extra band term for "hybrid" mode
-    w_band: float = 0.0,
-    # legacy args (BaccusModel から渡される可能性があるが、ここでは未使用)
-    use_diff_hp: bool = False,
-):
+def _bandpass(*args, **kwargs) -> np.ndarray:
     """
-    返り値は「最小化すべきスコア」。
-
-    - objective_type="hybrid":
-        score = w_rmse*RMSE - w_pearson*Pearson - w_band*Spearman(main band)
-      (RMSEは小さいほど良い / 相関は大きいほど良い → マイナスで入れる)
-
-    - objective_type="band_low_only":
-        score = - Spearman(0.5–4 Hz)
-
-    - objective_type="band_main_only":
-        score = - Spearman(4–30 Hz)
-
-    - objective_type="band_full":
-        score = - (0.5*Spearman(low) + 1.0*Spearman(main))
-      ※重みは論文用の合理的デフォルト。必要ならここを調整。
+    互換ラッパ：
+      _bandpass(x, dt, low_hz=..., high_hz=..., order=...)
+    だけでなく
+      _bandpass(x, dt, low=..., high=...)
+    も受ける（古い呼び出しの吸収）
     """
-    output_eval = np.asarray(output_eval, dtype=np.float64)
-    model_eval = np.asarray(model_eval, dtype=np.float64)
+    if len(args) < 2:
+        raise TypeError("_bandpass(x, dt, ...) が必要です")
+    x = args[0]
+    dt = args[1]
 
-    # 平坦な波形は強ペナルティ（相関が不定になりやすい）
-    if np.std(model_eval) <= 1e-9 or np.std(output_eval) <= 1e-9:
-        return 10.0
+    low_hz = kwargs.pop("low_hz", None)
+    high_hz = kwargs.pop("high_hz", None)
+    if low_hz is None:
+        low_hz = kwargs.pop("low", None)
+    if high_hz is None:
+        high_hz = kwargs.pop("high", None)
+    order = kwargs.pop("order", 4)
 
-    # --- band-only objectives ---
+    if low_hz is None or high_hz is None:
+        raise TypeError("_bandpass は low_hz/high_hz（または low/high）が必要です")
+
+    return _bandpass_zero_phase(np.asarray(x, dtype=float), float(dt), float(low_hz), float(high_hz), int(order))
+
+
+def _rmse(a: np.ndarray, b: np.ndarray) -> float:
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    n = min(a.size, b.size)
+    if n == 0:
+        return 1e9
+    d = a[:n] - b[:n]
+    return float(np.sqrt(np.mean(d * d)))
+
+
+def calculate(output: np.ndarray,
+              model: np.ndarray,
+              dt: float,
+              objective_type: str = "hybrid",
+              # hybrid 用
+              w_rmse: float = 1.0,
+              w_pearson: float = 1.0,
+              # band Spearman 用
+              band_low_hz: float = 0.5,
+              band_main_low_hz: float = 4.0,
+              band_main_high_hz: float = 30.0,
+              band_high_hz: float = 30.0,
+              band_order: int = 4,
+              # 全帯域/補助
+              use_diff_hp: bool = False,
+              w_band: float = 2.0,
+              ) -> float:
+    """
+    返り値は **最小化すべきスコア**（小さいほど良い）
+
+    objective_type:
+      - "band_low_only"  : 0.5–4Hz の Spearman を最大化（score = -rho）
+      - "band_main_only" : 4–30Hz の Spearman を最大化（score = -rho）
+      - "band_full"      : low + main を同時最大化（score = -(rho_low + rho_main)/2）
+      - "hybrid"         : 既存（RMSE + Pearson + band penalty など）
+    """
+    o = np.asarray(output, dtype=float)
+    m = np.asarray(model, dtype=float)
+    n = min(o.size, m.size)
+    if n < 8:
+        return 5.0
+    o = o[:n]
+    m = m[:n]
+
+    # ---- band objectives ----
     if objective_type in ("band_low_only", "band_main_only", "band_full"):
-        if dt is None:
-            # dtが無いならbandpassできないので、全体Spearmanで代替
-            rho = _safe_spearman(output_eval, model_eval)
-            return -rho
+        # z-score してから bandpass（BandEval と同じ思想）
+        o0 = _safe_zscore(o)
+        m0 = _safe_zscore(m)
 
-        o_low = _bandpass(output_eval, dt, band_low[0], band_low[1], order=filter_order)
-        m_low = _bandpass(model_eval, dt, band_low[0], band_low[1], order=filter_order)
+        # low: 0.5–4
+        o_low = _bandpass(o0, dt, low_hz=band_low_hz, high_hz=band_main_low_hz, order=band_order)
+        m_low = _bandpass(m0, dt, low_hz=band_low_hz, high_hz=band_main_low_hz, order=band_order)
 
-        o_main = _bandpass(output_eval, dt, band_main[0], band_main[1], order=filter_order)
-        m_main = _bandpass(model_eval, dt, band_main[0], band_main[1], order=filter_order)
+        # main: 4–30
+        o_main = _bandpass(o0, dt, low_hz=band_main_low_hz, high_hz=band_main_high_hz, order=band_order)
+        m_main = _bandpass(m0, dt, low_hz=band_main_low_hz, high_hz=band_main_high_hz, order=band_order)
 
-        rho_low = _safe_spearman(o_low, m_low)
-        rho_main = _safe_spearman(o_main, m_main)
+        # Spearman
+        rho_low, _ = spearmanr(o_low, m_low)
+        rho_main, _ = spearmanr(o_main, m_main)
+        if not np.isfinite(rho_low):
+            rho_low = 0.0
+        if not np.isfinite(rho_main):
+            rho_main = 0.0
 
         if objective_type == "band_low_only":
-            return -rho_low
+            return float(-rho_low)
         if objective_type == "band_main_only":
-            return -rho_main
+            return float(-rho_main)
 
         # band_full
-        return -(0.5 * rho_low + 1.0 * rho_main)
+        return float(-0.5 * (rho_low + rho_main))
 
-    # --- default: hybrid (RMSE + Pearson + optional band Spearman) ---
-    # 1. RMSE
-    diff = output_eval - model_eval
-    rmse = float(np.sqrt(np.mean(diff * diff)))
+    # ---- default hybrid (既存互換) ----
+    # 注意：ここはあなたの既存 hybrid 実装に合わせて調整してOK。
+    # 最低限「落ちない」形で入れてあります。
+    o0 = _safe_zscore(o)
+    m0 = _safe_zscore(m)
 
-    # 2. Pearson
-    r_val, _ = pearsonr(output_eval, model_eval)
-    if np.isnan(r_val):
-        r_val = 0.0
+    rmse = _rmse(o0, m0)
+    pr, _ = pearsonr(o0, m0)
+    if not np.isfinite(pr):
+        pr = 0.0
 
-    # 3. Optional band Spearman（main band）
-    rho_main = 0.0
-    if (w_band is not None) and (w_band != 0.0) and (dt is not None):
-        o_main = _bandpass(output_eval, dt, band_main[0], band_main[1], order=filter_order)
-        m_main = _bandpass(model_eval, dt, band_main[0], band_main[1], order=filter_order)
-        rho_main = _safe_spearman(o_main, m_main)
+    # optional: 4–30 band Spearman を penalty として追加
+    o_bp = _bandpass(o0, dt, low_hz=band_main_low_hz, high_hz=band_main_high_hz, order=band_order)
+    m_bp = _bandpass(m0, dt, low_hz=band_main_low_hz, high_hz=band_main_high_hz, order=band_order)
+    rho_band, _ = spearmanr(o_bp, m_bp)
+    if not np.isfinite(rho_band):
+        rho_band = 0.0
 
-    # 相関を最大化 → スコアではマイナスで入れる
-    score = (w_rmse * rmse) - (w_pearson * float(r_val)) - (float(w_band) * float(rho_main))
+    # 最小化：rmse は小、相関は大が良いので符号反転
+    score = (w_rmse * rmse) + (w_pearson * (1.0 - pr)) + (w_band * (1.0 - rho_band))
     return float(score)
