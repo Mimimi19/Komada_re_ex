@@ -1,27 +1,15 @@
 #!/bin/bash
-
-# chmod +x run_all.sh
-# ./run_all.sh
-
-# エラーが出たらそこで止まるようにする（必要なければ set -e を削除）
 set -e
 
-echo "Starting Batch 1: Ucb1 (10s segments)"
-uv run python main.py data=Ucb1 segment=10 hyper_params.objective_type=spearman
+echo "Starting ret2p ROI-average training with band_spearman..."
 
-echo "Starting Batch 2: Ucb2 (10s segments)"
-uv run python main.py data=Ucb2 segment=10 hyper_params.objective_type=spearman
+for roi in $(seq 1 14); do
+  echo "=== ROI ${roi} ==="
+  uv run python main.py \
+    data=ret2p-1 \
+    data.output_file=data/ret2p/roi_ave/response_ave_roi${roi}.txt \
+    hyper_params.objective_type=band_spearman \
+    hydra.run.dir=scripts/results/Baccus_ret2pAve/roi_${roi}
+done
 
-echo "Starting Batch 3: ret2p-1 (10s segments)"
-uv run python main.py data=ret2p-1 segment=10 hyper_params.objective_type=spearman
-
-echo "Starting Batch 4: Ucb1 (5s segments)"
-uv run python main.py data=Ucb1 segment=5 hyper_params.objective_type=spearman
-
-echo "Starting Batch 5: Ucb2 (5s segments)"
-uv run python main.py data=Ucb2 segment=5 hyper_params.objective_type=spearman
-
-echo "Starting Batch 6: ret2p-1 (5s segments)"
-uv run python main.py data=ret2p-1 segment=5 hyper_params.objective_type=spearman
-
-echo "All batch jobs completed!"
+echo "All ROI-average jobs completed!"
