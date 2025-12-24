@@ -372,37 +372,71 @@ class BaccusOptimizer:
                     output_aligned = output_aligned[:min_l]
                     model_aligned = model_aligned[:min_l]
 
-                # マスク処理（先頭のトランジェントを除外）
+                # マスク処理
                 mask_seconds = 1.0
                 mask_idx = int(mask_seconds / dt)
 
+                # デフォルトはペナルティ（必ず score が定義されるように）
+                score = 5.0
+                corr_value = None  # ログ用（最大化したい rho）
+
                 if mask_idx < len(output_aligned):
                     output_eval = output_aligned[mask_idx:]
-                    model_eval = model_aligned[mask_idx:]
+                    model_eval  = model_aligned[mask_idx:]
 
-                    # --- 目的関数の選択 ---
-                    if self.objective_type in ('hybrid', 'band_low_only', 'band_main_only', 'band_full'):
-                        # obj_hybrid は「最小化すべきスコア」を返す実装（相関は内部でマイナス符号で最大化）
-                        correlation = obj_hybrid.calculate(
-                            output_eval,
-                            model_eval,
-                            dt=dt,
-                            objective_type=self.objective_type,
-                            # hybrid で band(main) を混ぜたい場合だけ w_band を >0 にする
-                            # band_* の場合は w_band は無視されます
-                            w_band=hp.get('w_band', 0.0),
+                    # 目的関数の選択
+                    # score は「最小化」なので基本 -rho を返す
+                    if self.objective_type == "band_main_only":
+                        # 4–30 Hz
+                        o_bp = obj_hybrid._bandpass_zero_phase(
+                            output_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
                         )
-                    else:
-                        # Spearman順位相関（従来）
-                        correlation = obj_spearman.calculate(output_eval, model_eval)
-                else:
-                    score = 5.0  # 長さ不足時のペナルティ
-            else:
-                self.failed_lnk_model_runs += 1
-                score = 5.0  # 計算失敗時のペナルティ
+                        m_bp = obj_hybrid._bandpass_zero_phase(
+                            model_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
+                        )
+                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
+                        corr_value = -score
 
-            # この関数の返り値は最小化対象（score）
-            correlation = score
+                    elif self.objective_type == "band_low_only":
+                        # 0.5–4 Hz
+                        o_bp = obj_hybrid._bandpass_zero_phase(
+                            output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
+                        )
+                        m_bp = obj_hybrid._bandpass_zero_phase(
+                            model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
+                        )
+                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
+                        corr_value = -score
+
+                    elif self.objective_type == "band_full":
+                        # 0.5–30 Hz（あなたの BandEval と整合）
+                        o_bp = obj_hybrid._bandpass_zero_phase(
+                            output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
+                        )
+                        m_bp = obj_hybrid._bandpass_zero_phase(
+                            model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
+                        )
+                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
+                        corr_value = -score
+
+                    elif self.objective_type == "hybrid":
+                        # 既存ハイブリッド（RMSE+Pearson+band penalty 等）
+                        score = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
+                        corr_value = None  # hybrid は相関そのものじゃないので None のままでもOK
+
+                    else:
+                        # 互換：全帯域 Spearman
+                        score = obj_spearman.calculate(output_eval, model_eval)
+                        corr_value = -score
+
+                # MLflow ログ（band_* のときは corr_value を入れる）
+                try:
+                    if corr_value is not None:
+                        mlflow.log_metric("spearman_rho_eval", float(corr_value))
+                except Exception:
+                    pass
+
+                correlation = score
             
 
 
