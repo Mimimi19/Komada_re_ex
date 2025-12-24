@@ -349,105 +349,64 @@ class BaccusOptimizer:
             print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
             # Evaluation
-            score = 5.0  # デフォルトペナルティ（大きいほど悪い）
+                        # ==========================================================
+            # Evaluation  (ALWAYS define correlation)
+            # ==========================================================
+            correlation = 5.0  # ← これを最初に置く（未代入バグ潰し）
 
             if check == 1:
-                # 配列長の調整
                 current_len = len(A_state)
                 output_aligned = self.Output[:current_len]
-
-                # 先行研究寄り: A_state を出力として扱う
                 model_aligned = A_state
 
-                # スケール差でスコアが支配されないように z-score 正規化
+                # z-score normalize
                 o_std = np.std(output_aligned)
                 m_std = np.std(model_aligned)
                 if o_std > 1e-9:
                     output_aligned = (output_aligned - np.mean(output_aligned)) / o_std
+                else:
+                    output_aligned = output_aligned - np.mean(output_aligned)
                 if m_std > 1e-9:
                     model_aligned = (model_aligned - np.mean(model_aligned)) / m_std
+                else:
+                    model_aligned = model_aligned - np.mean(model_aligned)
 
-                if len(output_aligned) != len(model_aligned):
-                    min_l = min(len(output_aligned), len(model_aligned))
-                    output_aligned = output_aligned[:min_l]
-                    model_aligned = model_aligned[:min_l]
+                min_l = min(len(output_aligned), len(model_aligned))
+                output_aligned = output_aligned[:min_l]
+                model_aligned = model_aligned[:min_l]
 
-                # マスク処理
+                # mask
                 mask_seconds = 1.0
                 mask_idx = int(mask_seconds / dt)
 
-                # デフォルトはペナルティ（必ず score が定義されるように）
-                score = 5.0
-                corr_value = None  # ログ用（最大化したい rho）
-
                 if mask_idx < len(output_aligned):
                     output_eval = output_aligned[mask_idx:]
-                    model_eval  = model_aligned[mask_idx:]
+                    model_eval = model_aligned[mask_idx:]
 
-                    # 目的関数の選択
-                    # score は「最小化」なので基本 -rho を返す
-                    if self.objective_type == "band_main_only":
-                        # 4–30 Hz
-                        o_bp = obj_hybrid._bandpass(
-                            output_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
+                    # objective switch
+                    if self.objective_type in ("hybrid", "band_low_only", "band_main_only", "band_full"):
+                        correlation = obj_hybrid.calculate(
+                            output_eval,
+                            model_eval,
+                            dt=dt,
+                            objective_mode=self.objective_type,  # ←これが重要
+                            w_band=1.0,
+                            order=4,
                         )
-                        m_bp = obj_hybrid._bandpass(
-                            model_eval.astype(np.float64), dt, low_hz=4.0, high_hz=30.0, order=4
-                        )
-                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
-                        corr_value = -score
-
-                    elif self.objective_type == "band_low_only":
-                        # 0.5–4 Hz
-                        o_bp = obj_hybrid._bandpass(
-                            output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
-                        )
-                        m_bp = obj_hybrid._bandpass(
-                            model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=4.0, order=4
-                        )
-                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
-                        corr_value = -score
-
-                    elif self.objective_type == "band_full":
-                        # 0.5–30 Hz（あなたの BandEval と整合）
-                        o_bp = obj_hybrid._bandpass(
-                            output_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
-                        )
-                        m_bp = obj_hybrid._bandpass(
-                            model_eval.astype(np.float64), dt, low_hz=0.5, high_hz=30.0, order=4
-                        )
-                        score = obj_spearman.calculate(o_bp, m_bp)  # = -rho
-                        corr_value = -score
-
-                    elif self.objective_type == "hybrid":
-                        # 既存ハイブリッド（RMSE+Pearson+band penalty 等）
-                        score = obj_hybrid.calculate(output_eval, model_eval, dt=dt, use_diff_hp=True, w_band=2.0)
-                        corr_value = None  # hybrid は相関そのものじゃないので None のままでもOK
-
                     else:
-                        # 互換：全帯域 Spearman
-                        score = obj_spearman.calculate(output_eval, model_eval)
-                        corr_value = -score
+                        # fallback: spearman objective module
+                        correlation = obj_spearman.calculate(output_eval, model_eval)
+                else:
+                    correlation = 5.0
+            else:
+                self.failed_lnk_model_runs += 1
+                correlation = 5.0
 
-                # MLflow ログ（band_* のときは corr_value を入れる）
-                try:
-                    if corr_value is not None:
-                        mlflow.log_metric("spearman_rho_eval", float(corr_value))
-                except Exception:
-                    pass
-
-                correlation = score
-            
-
-
-            
             self.current_epoch_best_fun_value = correlation
 
             if save_states:
                 return correlation, R_state, A_state, I1_state, I2_state
-            else:
-                return correlation
-
+            return correlation
         except Exception as e:
             print(f"エラー内容: {e}")
             import traceback
