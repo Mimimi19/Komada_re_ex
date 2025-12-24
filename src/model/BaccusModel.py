@@ -381,17 +381,20 @@ class BaccusOptimizer:
                     model_eval = model_aligned[mask_idx:]
 
                     # --- 目的関数の選択 ---
-                    if self.objective_type == 'hybrid':
-                        # 戻り値は「最小化すべきスコア」
-                        score = obj_hybrid.calculate(
-                            output_eval, model_eval,
+                    if self.objective_type in ('hybrid', 'band_low_only', 'band_main_only', 'band_full'):
+                        # obj_hybrid は「最小化すべきスコア」を返す実装（相関は内部でマイナス符号で最大化）
+                        correlation = obj_hybrid.calculate(
+                            output_eval,
+                            model_eval,
                             dt=dt,
-                            use_diff_hp=True,
-                            w_band=2.0
+                            objective_type=self.objective_type,
+                            # hybrid で band(main) を混ぜたい場合だけ w_band を >0 にする
+                            # band_* の場合は w_band は無視されます
+                            w_band=hp.get('w_band', 0.0),
                         )
                     else:
-                        # Spearman順位相関（実装が -rho を返すなら最小化に整合）
-                        score = obj_spearman.calculate(output_eval, model_eval)
+                        # Spearman順位相関（従来）
+                        correlation = obj_spearman.calculate(output_eval, model_eval)
                 else:
                     score = 5.0  # 長さ不足時のペナルティ
             else:
@@ -400,6 +403,7 @@ class BaccusOptimizer:
 
             # この関数の返り値は最小化対象（score）
             correlation = score
+            
 
 
             
