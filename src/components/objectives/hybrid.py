@@ -1,130 +1,118 @@
-# src/components/objectives/hybrid.py
+# -*- coding: utf-8 -*-
 import numpy as np
-from scipy.stats import pearsonr, spearmanr 
+from scipy.stats import pearsonr, spearmanr
 from scipy.signal import butter, filtfilt
 
-def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
-    """シンプルな移動平均ローパス。
-    win <= 1 の場合は入力をそのまま返す。
+def _bandpass(x: np.ndarray, dt: float, lo_hz: float, hi_hz: float, order: int = 4) -> np.ndarray:
     """
-    if win is None or win <= 1:
-        return x
-    kernel = np.ones(win, dtype=np.float64) / float(win)
-    return np.convolve(x, kernel, mode="same")
-
-def _bandpass_zero_phase(x: np.ndarray, dt: float, low_hz: float, high_hz: float, order: int = 4) -> np.ndarray:
-    """
-    ゼロ位相バンドパス（butter + filtfilt）
-    dt が無い/不正な場合や、設計不能な場合はそのまま返す。
+    Butterworth bandpass (zero-phase).
+    dt: sampling interval [s]
+    lo_hz, hi_hz: band edges [Hz]
     """
     if dt is None or dt <= 0:
         return x
+
     fs = 1.0 / dt
     nyq = 0.5 * fs
 
-    # 正規化周波数（0<low<high<nyq）
-    low = low_hz / nyq
-    high = high_hz / nyq
-    if not (0 < low < high < 1.0):
+    lo = max(float(lo_hz), 1e-6)
+    hi = min(float(hi_hz), nyq * 0.999)
+
+    if hi <= lo:
         return x
 
-    # filtfilt が短すぎる系列で落ちるのを避ける（ざっくり安全策）
-    if len(x) < max(32, 3 * (order + 1)):
-        return x
-
-    b, a = butter(order, [low, high], btype="band")
+    b, a = butter(order, [lo / nyq, hi / nyq], btype="bandpass")
     return filtfilt(b, a, x)
 
+def _safe_spearman(a: np.ndarray, b: np.ndarray) -> float:
+    rho, _ = spearmanr(a, b)
+    if np.isnan(rho):
+        return 0.0
+    return float(rho)
 
-def calculate(output_eval, model_eval, dt=None,
-              lp_sec=0.125,   # 低域抽出用のローパス窓(秒)
-              w_low=1.0,     # 低周波RMSEの重み
-              w_high=3.0,    # 高周波RMSEの重み
-              w_corr=0.5,    # 相関の重み（従来の 0.5 を踏襲）
-              use_diff_hp=False, # True: 差分で高域を見る（より攻める）
-            #   4–30Hz band
-              use_band_spearman=True,
-              bp_low_hz=4.0,
-              bp_high_hz=30.0,
-              bp_order=4,
-              w_band=1.0
-              ):
+def calculate(
+    output_eval: np.ndarray,
+    model_eval: np.ndarray,
+    *,
+    dt: float | None = None,
+    objective_type: str = "hybrid",
+    # hybrid weights
+    w_rmse: float = 1.0,
+    w_pearson: float = 0.5,
+    # band objective settings
+    band_low: tuple[float, float] = (0.5, 4.0),
+    band_main: tuple[float, float] = (4.0, 30.0),
+    filter_order: int = 4,
+    # extra band term for "hybrid" mode
+    w_band: float = 0.0,
+    # legacy args (BaccusModel から渡される可能性があるが、ここでは未使用)
+    use_diff_hp: bool = False,
+):
     """
-    RMSEとピアソン相関を組み合わせたハイブリッドスコア
-    分布の仮定が不要なRMSEで「値」を合わせ、相関で「形」を合わせる。
+    返り値は「最小化すべきスコア」。
 
-    正規分布かどうかに依存しない最強の指標は RMSE（二乗平均平方根誤差） です。これは単純に「正解との距離」を測るため、分布の仮定は不要です。
-    ただし、RMSEだけだと「波形のタイミング」より「全体の値のズレ」を優先しすぎることがあります。
-    そのため、「RMSE（値のズレを直す）」＋「相関係数（タイミングを合わせる）」を組み合わせるのが、波形フィッティングでは定石です。分布が心配であれば、RMSEの比重を高めれば安全です。
+    - objective_type="hybrid":
+        score = w_rmse*RMSE - w_pearson*Pearson - w_band*Spearman(main band)
+      (RMSEは小さいほど良い / 相関は大きいほど良い → マイナスで入れる)
 
-    まじで予測結果が直線になっちゃうので
-    従来のRMSEは「大局（低周波）」が合うだけでもスコアが改善しやすく、
-    “細かい周波数成分（高周波）” が無視されがちです。
-    そこで、ローパスで低域を分離し、高域（残差）にもRMSEを課すことで
-    「大局 + 細部」の両方を当てにいきます。
+    - objective_type="band_low_only":
+        score = - Spearman(0.5–4 Hz)
+
+    - objective_type="band_main_only":
+        score = - Spearman(4–30 Hz)
+
+    - objective_type="band_full":
+        score = - (0.5*Spearman(low) + 1.0*Spearman(main))
+      ※重みは論文用の合理的デフォルト。必要ならここを調整。
     """
-    # 平坦な波形のチェック
-    if np.std(model_eval) > 1e-9 and np.std(output_eval) > 1e-9:
-        # 1. RMSE (Root Mean Squared Error): 値の絶対的な誤差
-        # 小さいほど良い (0に近いほど良い)
+    output_eval = np.asarray(output_eval, dtype=np.float64)
+    model_eval = np.asarray(model_eval, dtype=np.float64)
 
-        # --- (A) 低周波/高周波に分解 ---
-        if dt is not None and dt > 0:
-            win = max(3, int(lp_sec / dt))
+    # 平坦な波形は強ペナルティ（相関が不定になりやすい）
+    if np.std(model_eval) <= 1e-9 or np.std(output_eval) <= 1e-9:
+        return 10.0
 
-        else:
-            # dtがない場合は安全に「長さに応じた窓」にする（過度に大きくしない）
-            win = max(3, int(0.01 * len(output_eval)))  # 長さの1%程度
+    # --- band-only objectives ---
+    if objective_type in ("band_low_only", "band_main_only", "band_full"):
+        if dt is None:
+            # dtが無いならbandpassできないので、全体Spearmanで代替
+            rho = _safe_spearman(output_eval, model_eval)
+            return -rho
 
-        low_o = _moving_average(output_eval, win)
-        low_m = _moving_average(model_eval, win)
+        o_low = _bandpass(output_eval, dt, band_low[0], band_low[1], order=filter_order)
+        m_low = _bandpass(model_eval, dt, band_low[0], band_low[1], order=filter_order)
 
-        # 高周波（残差）
-        high_o = output_eval - low_o
-        high_m = model_eval - low_m
+        o_main = _bandpass(output_eval, dt, band_main[0], band_main[1], order=filter_order)
+        m_main = _bandpass(model_eval, dt, band_main[0], band_main[1], order=filter_order)
 
-        # さらに“細部”を強く当てたい場合は差分を見る（より高域寄り）
-        if use_diff_hp:
-            high_o = np.diff(output_eval)
-            high_m = np.diff(model_eval)
+        rho_low = _safe_spearman(o_low, m_low)
+        rho_main = _safe_spearman(o_main, m_main)
 
-        # 低域RMSE
-        mse_low = np.mean((low_o - low_m) ** 2)
-        rmse_low = np.sqrt(mse_low)
+        if objective_type == "band_low_only":
+            return -rho_low
+        if objective_type == "band_main_only":
+            return -rho_main
 
-        # 高域RMSE
-        mse_high = np.mean((high_o - high_m) ** 2)
-        rmse_high = np.sqrt(mse_high)
+        # band_full
+        return -(0.5 * rho_low + 1.0 * rho_main)
 
-        # 2. Pearson Correlation: 形の類似度
-        # 線形な関係性を見るため、正規分布でなくとも「波形の類似度」の指標としては機能する
-        r_val, _ = pearsonr(output_eval, model_eval)
-        
-        band_penalty = 0.0
-        if use_band_spearman and (dt is not None) and (dt > 0):
-            # 4–30Hz に通して、順位一致を強制
-            o_bp = _bandpass_zero_phase(output_eval.astype(np.float64), dt, bp_low_hz, bp_high_hz, order=bp_order)
-            m_bp = _bandpass_zero_phase(model_eval.astype(np.float64), dt, bp_low_hz, bp_high_hz, order=bp_order)
+    # --- default: hybrid (RMSE + Pearson + optional band Spearman) ---
+    # 1. RMSE
+    diff = output_eval - model_eval
+    rmse = float(np.sqrt(np.mean(diff * diff)))
 
-            # 定数系列だと spearmanr が nan になるので回避
-            if np.std(o_bp) > 1e-9 and np.std(m_bp) > 1e-9:
-                rho_band, _ = spearmanr(o_bp, m_bp)
-                if np.isfinite(rho_band):
-                    # 最小化なので (1 - rho) を足す
-                    band_penalty = w_band * (1.0 - float(rho_band))
-                else:
-                    band_penalty = w_band * 1.0
-            else:
-                band_penalty = w_band * 1.0
+    # 2. Pearson
+    r_val, _ = pearsonr(output_eval, model_eval)
+    if np.isnan(r_val):
+        r_val = 0.0
 
-        # --- 目的関数 ---
-        # score = (低域RMSE) + (高域RMSE) - (重み * 相関)
-        # 相関が1に近づくほどスコアが下がり、RMSEが0に近づくほどスコアが下がる
+    # 3. Optional band Spearman（main band）
+    rho_main = 0.0
+    if (w_band is not None) and (w_band != 0.0) and (dt is not None):
+        o_main = _bandpass(output_eval, dt, band_main[0], band_main[1], order=filter_order)
+        m_main = _bandpass(model_eval, dt, band_main[0], band_main[1], order=filter_order)
+        rho_main = _safe_spearman(o_main, m_main)
 
-        score = (w_low * rmse_low) + (w_high * rmse_high) - (w_corr * r_val) + band_penalty
-        
-
-    else:
-        score = 10.0 # 強いペナルティ
-
-    return score
+    # 相関を最大化 → スコアではマイナスで入れる
+    score = (w_rmse * rmse) - (w_pearson * float(r_val)) - (float(w_band) * float(rho_main))
+    return float(score)
