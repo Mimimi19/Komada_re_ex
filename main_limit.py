@@ -144,6 +144,7 @@ class OptimizeConfig:
     out_root: str
     objective: str
     n_seeds: int
+    seed_start: int
     roi_start: int
     roi_end: int
     data_name: str = "ret2pLimit"
@@ -188,9 +189,31 @@ def optimize(cfg: OptimizeConfig) -> Path:
         roi_out.mkdir(parents=True, exist_ok=True)
 
         scores: List[float] = []
-        for s in range(cfg.n_seeds):
-            seed = s + 1
+
+        # ★seedは 1..n_seeds の「番号」として扱う（seed_01, seed_02, ...）
+        start_seed = max(1, int(cfg.seed_start))
+        end_seed = int(cfg.n_seeds)
+
+        for seed in range(start_seed, end_seed + 1):
             run_out = roi_out / f"seed_{seed:02d}"
+
+            # ★途中再開のため、既にディレクトリがあればスキップ
+            if run_out.exists():
+                existing = _find_best_score(run_out)
+                print(f"[SKIP] exists: {run_out} metric={existing}")
+                summary_rows.append({
+                    "roi": roi,
+                    "objective": cfg.objective,
+                    "seed": seed,
+                    "returncode": 0,
+                    "metric": existing,
+                    "run_dir": str(run_out),
+                    "skipped": True,
+                })
+                if existing is not None:
+                    scores.append(float(existing))
+                continue
+
             rc = _run_one_baccus(cfg.stim, str(resp_path), cfg.dt, run_out, cfg.objective, seed, cfg.data_name)
             score = _find_best_score(run_out)
 
@@ -201,6 +224,7 @@ def optimize(cfg: OptimizeConfig) -> Path:
                 "returncode": rc,
                 "metric": score,
                 "run_dir": str(run_out),
+                "skipped": False,
             })
             if score is not None:
                 scores.append(float(score))
@@ -326,6 +350,7 @@ def _parse_args():
     p_opt.add_argument("--out-root", required=True, help="結果保存ルート")
     p_opt.add_argument("--objective", required=True, choices=["band_low_only", "band_main_only", "band_full"])
     p_opt.add_argument("--n-seeds", type=int, default=30)
+    p_opt.add_argument("--seed-start", type=int, default=1, help="resume from this seed number (1-based). e.g., --seed-start 7")
     p_opt.add_argument("--roi-start", type=int, default=1)
     p_opt.add_argument("--roi-end", type=int, default=14)
     p_opt.add_argument("--data-name", type=str, default="ret2pLimit")
@@ -336,6 +361,7 @@ def _parse_args():
     p_pc.add_argument("--same-cell-map", required=True, help="2列: roi_index, cell_id")
     p_pc.add_argument("--out", required=True)
     p_pc.add_argument("--order", type=int, default=4)
+
 
     return p.parse_args()
 
@@ -349,6 +375,7 @@ def main():
             out_root=args.out_root,
             objective=args.objective,
             n_seeds=args.n_seeds,
+            seed_start=args.seed_start,
             roi_start=args.roi_start,
             roi_end=args.roi_end,
             data_name=args.data_name,
