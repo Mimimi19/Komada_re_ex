@@ -45,6 +45,7 @@ import argparse
 import json
 import os
 import subprocess
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -147,6 +148,7 @@ class OptimizeConfig:
     seed_start: int
     roi_start: int
     roi_end: int
+    roi_list: str = ""
     data_name: str = "ret2pLimit"
 
 
@@ -179,7 +181,16 @@ def optimize(cfg: OptimizeConfig) -> Path:
 
     summary_rows: List[Dict[str, object]] = []
 
-    for roi in range(cfg.roi_start, cfg.roi_end + 1):
+    # ROIの回す順番を指定可能にする
+    # - cfg.roi_list が空なら従来通り roi_start..roi_end
+    # - 例: cfg.roi_list="14,9,5" の場合はその順で実行
+    if getattr(cfg, "roi_list", "") and str(cfg.roi_list).strip() != "":
+        roi_list = [int(x) for x in str(cfg.roi_list).split(",") if str(x).strip() != ""]
+    else:
+        roi_list = list(range(cfg.roi_start, cfg.roi_end + 1))
+
+    for roi in roi_list:
+
         resp_path = roi_dir / f"response_ave_roi{roi}.txt"
         if not resp_path.exists():
             print(f"[SKIP] ROI {roi}: not found {resp_path}")
@@ -353,6 +364,7 @@ def _parse_args():
     p_opt.add_argument("--seed-start", type=int, default=1, help="resume from this seed number (1-based). e.g., --seed-start 7")
     p_opt.add_argument("--roi-start", type=int, default=1)
     p_opt.add_argument("--roi-end", type=int, default=14)
+    p_opt.add_argument("--roi-list", type=str, default="", help="Comma separated ROI list (e.g. 14,9,5). If set, overrides --roi-start/--roi-end")
     p_opt.add_argument("--data-name", type=str, default="ret2pLimit")
 
     p_pc = sub.add_parser("pseudo_ceiling")
@@ -364,6 +376,7 @@ def _parse_args():
 
 
     return p.parse_args()
+
 
 def main():
     args = _parse_args()
@@ -378,6 +391,7 @@ def main():
             seed_start=args.seed_start,
             roi_start=args.roi_start,
             roi_end=args.roi_end,
+            roi_list=args.roi_list,
             data_name=args.data_name,
         )
         optimize(cfg)
