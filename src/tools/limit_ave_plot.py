@@ -122,14 +122,15 @@ def main():
     ax.legend(loc="upper right")
 
     plt.tight_layout()
-    png_path = os.path.join(out_dir, "limit_ave_plot.png")
-    plt.savefig(png_path, dpi=200)
+    pdf_path = os.path.join(out_dir, "limit_ave_plot.pdf")
+    plt.savefig(pdf_path, bbox_inches="tight")
+
     plt.close(fig)
 
     tex_path = os.path.join(out_dir, "limit_ave_plot.tex")
     save_latex_snippet(
         out_tex=tex_path,
-        png_name="limit_ave_plot.png",
+        png_name="limit_ave_plot.pdf",
         title=f"ROI{roi}: overlay of 30 optimized A-state traces and ROI-average response.",
     )
 
@@ -140,7 +141,7 @@ def main():
     print(f"base_dir : {base_dir}")
     print(f"roi      : {roi}")
     print(f"out_dir  : {out_dir}")
-    print(f"saved    : {png_path}")
+    print(f"saved    : {pdf_path}")
     print(f"saved    : {tex_path}")
 
 if __name__ == "__main__":

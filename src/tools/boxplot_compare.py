@@ -140,9 +140,11 @@ def main():
         med = float(np.quantile(scores, 0.5))
         ax.text(i, med, f"{med:.3f}", ha="center", va="bottom", fontsize=9)
 
-    png_path = os.path.join(outdir, "boxplot_compare.png")
+    pdf_path = os.path.join(outdir, "boxplot_compare.pdf")
     plt.tight_layout()
-    plt.savefig(png_path, dpi=200)
+    pdf_path = os.path.join(outdir, "boxplot_compare.pdf")
+    plt.savefig(pdf_path, bbox_inches="tight")
+
     plt.close()
 
     # LaTeX snippet
@@ -153,13 +155,13 @@ def main():
     \caption{Objective comparison (boxplots) for %s.}
     \label{fig:%s_objective_boxplot}
     \end{figure}
-     """ % (os.path.basename(png_path), os.path.basename(roi_dir), os.path.basename(roi_dir))
+     """ % (os.path.basename(pdf_path), os.path.basename(roi_dir), os.path.basename(roi_dir))
 
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(tex)
 
     print("\nSaved:")
-    print("  " + png_path)
+    print("  " + pdf_path)
     print("  " + tex_path)
     print("  " + tsv_path)
 

@@ -111,8 +111,10 @@ def main():
     ax.text(0.02, 0.02, txt, transform=ax.transAxes)
 
     plt.tight_layout()
-    png_path = os.path.join(out_dir, "boxplot.png")
-    plt.savefig(png_path, dpi=200)
+    pdf_path = os.path.join(out_dir, "boxplot.png")
+    pdf_path = os.path.join(outdir, "boxplot_compare.pdf")
+    plt.savefig(pdf_path, bbox_inches="tight")
+
     plt.close(fig)
 
     # LaTeX
@@ -126,7 +128,7 @@ def main():
     print("=== boxplot ===")
     print(f"base_dir : {base_dir}")
     print(f"out_dir  : {out_dir}")
-    print(f"saved    : {png_path}")
+    print(f"saved    : {pdf_path}")
     print(f"saved    : {tex_path}")
     print(f"saved    : {stats_path}")
 

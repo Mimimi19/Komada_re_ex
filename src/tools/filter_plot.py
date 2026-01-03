@@ -147,7 +147,7 @@ def _plot_kernel_overlay(kernels: list[np.ndarray], delays: np.ndarray, out_path
     ax.grid(True, which="major", linestyle="--", alpha=0.35)
     ax.grid(True, which="minor", linestyle="--", alpha=0.15)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 def _plot_nonlinear_scatter(G_list, U_list, out_path: str, title: str, max_points_per_seed: int = 80000):
@@ -173,7 +173,7 @@ def _plot_nonlinear_scatter(G_list, U_list, out_path: str, title: str, max_point
     ax.grid(True, which="major", linestyle="--", alpha=0.35)
     ax.grid(True, which="minor", linestyle="--", alpha=0.15)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -265,7 +265,7 @@ def main():
         _plot_kernel_overlay(
             ks,
             delays,
-            out_path=os.path.join(out_dir, f"linear_filter_kernel_tau{tau:.2f}.png"),
+            out_path=os.path.join(out_dir, f"linear_filter_kernel_tau{tau:.2f}.pdf"),
             title=f"Linear filter  (tau={tau:.2f}s)",
         )
 
@@ -341,7 +341,7 @@ def main():
     _plot_nonlinear_scatter(
         G_list,
         U_list,
-        out_path=os.path.join(out_dir, "nonlinear_g_vs_u.png"),
+        out_path=os.path.join(out_dir, "nonlinear_g_vs_u.pdf"),
         title="Nonlinear filter",
         max_points_per_seed=args.max_points,
     )
@@ -351,7 +351,7 @@ def main():
     print(f"stimulus : {stim_path}")
     print(f"dt       : {dt}")
     print(f"out_dir  : {out_dir}")
-    print("saved    : linear_filter_kernel_tau*.png, nonlinear_g_vs_u.png")
+    print("saved    : linear_filter_kernel_tau*.pdf, nonlinear_g_vs_u.pdf")
 
 
 if __name__ == "__main__":
