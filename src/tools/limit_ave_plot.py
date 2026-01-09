@@ -12,7 +12,7 @@ limit 実験（scripts/limit/roi_1/band_low_only/seed_*/state/A_state.txt）
 
 使い方:
   uv run python src/tools/limit_ave_plot.py
-  uv run python src/tools/limit_ave_plot.py --base scripts/limit/roi_1/band_low_only --roi 1
+  uv run python src/tools/limit_ave_plot.py --base scripts/limit_full --roi 1
 """
 import os
 import argparse
@@ -65,7 +65,7 @@ def main():
     # ==========================================================
     # ▼▼▼ ここを編集すれば、対象を切り替えられます ▼▼▼
     # ==========================================================
-    DEFAULT_BASE = "scripts/limit/roi_1/band_low_only"
+    DEFAULT_BASE = "scripts/limit_full"
     DEFAULT_ROI = 1
     RESPONSE_AVE_TEMPLATE = "data/ret2p/roi_ave/response_ave_roi{roi}.txt"
     DT = 0.015625  # 64Hz 前提（固定）

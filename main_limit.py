@@ -28,9 +28,23 @@ main_limit.py (no-repeat version)
      --stim data/ret2p/chirp_stim_64Hz_bilinear.txt \
      --dt 0.015625 \
      --roi-ave-dir data/ret2p/roi_ave \
-     --out-root scripts/results/Baccus_ret2pLimit \
-     --objective band_main_only \
-     --n-seeds 30
+     --out-root scripts/limit \
+     --objective band_low_only \
+     --roi-list "[1,14,13,2,12,3,11,4,10,5,9,6,8,7]" \
+     --n-seeds 30 \
+     --seed-start 1 \
+     --data-name ret2p_64Hz
+     
+     uv run python main_limit.py optimize \
+     --stim "data/cb1/wn_0.0002s.txt" \
+     --dt 0.015625 \
+     --roi-ave-dir data/cb1 \
+     --out-root scripts/limit \
+     --objective band_low_only \
+     --roi-list "[1,14,13,2,12,3,11,4,10,5,9,6,8,7]" \
+     --n-seeds 30 \
+     --seed-start 1 \
+     --data-name ret2p_64Hz
 
 2) (任意) 同一細胞対応がある場合の pseudo ceiling 推定
    uv run python main_limit.py pseudo_ceiling \
