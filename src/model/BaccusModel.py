@@ -643,7 +643,7 @@ class BaccusOptimizer:
         #局所探索 (Powell)
         # config.yaml に local_maxiter を追加するか、ここではDEのイテレーション数を流用
         local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2)
-        result = minimize(
+        powell_result =minimize(
             self.lnk_model,          # 目的関数
             de_result.x,             # DEで見つけた最適解を初期値 (x0) に設定
             method='Powell',         # 微分不要で高速な局所探索手法
@@ -653,9 +653,20 @@ class BaccusOptimizer:
                 'maxiter': local_maxiter # 局所探索用のイテレーション数
             }
         )
+        
+        print("\nPowell 法による局所探索が完了しました。")
+        pprint.pprint(powell_result)
+        
+        if powell_result.fun <= de_result.fun:
+            print("Powell 結果の方が良かったため、これを最終解として採用します。")
+            final_result = powell_result
+        else:
+            print("Powell で目的関数が悪化したため、DE の解を最終解として採用します。")
+            final_result = de_result
+
 
         print("\nハイブリッド最適化が完了しました。")
-        pprint.pprint(result)
+        pprint.pprint(final_result)
 
         print("\n--- 検証統計 ---")
         # 成功した実行回数を計算
@@ -680,8 +691,8 @@ class BaccusOptimizer:
 
         print("検証統計をMLflowに保存しました。")
 
-        optimal_params = result.x
-        optimal_correlation = -result.fun
+        optimal_params = final_result.x
+        optimal_correlation = -final_result.fun
 
         # 戻り値受け取り変更
         res_tuple = self.lnk_model(optimal_params, save_states=True)

@@ -1,193 +1,196 @@
+# main_cb30.py
 # -*- coding: utf-8 -*-
 """
-main_cb30.py
-============
-cb1 / cb2 を「1 ROI 相当」として扱い、各 objective で seed を変えて N 回最適化を回すバッチランナー。
+cb1 / cb2 の 30 回最適化を回すためのユーティリティ。
+
+- data-config には、
+    1) 先頭に data: を持つ Hydra 形式
+       data:
+         name: cb1
+         input_file: ...
+         output_file: ...
+         dt: 0.0002
+    2) いまの cb1.yaml のような top-level 形式
+       name: cb1
+       input_file: ...
+       output_file: ...
+       dt: 0.0002
+  の両方を受け付ける。
+
+- 各 seed ごとに BaccusModel.py を別ディレクトリに実行する:
+    <out_root>/<data_name>/<objective>/seed_XX/
 
 実行例:
-  uv run python main_cb30.py \
-    --data-config config/data/cb1.yaml \
-    --objective band_low_only \
-    --n-seeds 30 \
-    --seed-start 1 \
-    --out-root scripts/limit_cb \
-    --data-name cb1Hz
-
-  uv run python main_cb30.py \
-    --data-config config/data/cb2.yaml \
-    --objective band_full \
-    --n-seeds 30 \
-    --seed-start 1 \
-    --out-root scripts/limit_cb \
-    --data-name cb2_64Hz
-
-出力:
-  <out_root>/<data_name>/<objective>/seed_XX/  (Hydra run dir)
-  例: scripts/limit_cb/cb1_64Hz/band_low_only/seed_01/...
-
-注意:
-- 既存の src/model/BaccusModel.py が SciPy の differential_evolution に seed を渡していない場合、
-  ここで seed を変えても「完全な再現性」は保証されません（ただし試行ごとの初期乱数系列が変わる可能性はあります）。
-- 再現性を強く求める場合は、BaccusModel.py 側で differential_evolution(..., seed=opt_cfg.seed) を追加してください。
+    uv run python main_cb30.py \
+        --data-config config/data/cb1.yaml \
+        --objective band_full \
+        --n-seeds 30 \
+        --seed-start 1 \
+        --out-root scripts/limit_cb \
+        --data-name cb1Hz
 """
-import argparse
-import os
-import subprocess
-import sys
-from pathlib import Path
 
+import os
+import sys
+import argparse
+import subprocess
 import yaml
 
 
-def load_data_config(path: str):
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"data config not found: {path}")
-    with p.open("r", encoding="utf-8") as f:
+def load_data_config(path: str) -> dict:
+    """
+    YAML から刺激パス・応答パス・dt を取得する。
+    - data: {...} があればその中を使う
+    - なければ top-level をそのまま data とみなす
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"data-config not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    if not isinstance(cfg, dict) or "data" not in cfg:
-        raise ValueError(f"invalid yaml (need top-level 'data'): {path}")
 
-    data = cfg["data"]
-    if not isinstance(data, dict):
-        raise ValueError(f"invalid yaml: data must be dict: {path}")
+    if cfg is None or not isinstance(cfg, dict):
+        raise ValueError(f"invalid yaml: {path}")
 
-    input_file = data.get("input_file")
-    output_file = data.get("output_file")
-    dt = data.get("dt")
-    name = data.get("name", None)
+    # data: {...} にも top-level にも対応
+    if "data" in cfg and isinstance(cfg["data"], dict):
+        d = cfg["data"]
+    else:
+        d = cfg
 
-    if input_file is None or output_file is None or dt is None:
-        raise ValueError(f"yaml must include data.input_file, data.output_file, data.dt: {path}")
+    required = ["input_file", "output_file", "dt"]
+    for k in required:
+        if k not in d:
+            raise ValueError(f"'{k}' missing in data-config: {path}")
 
-    return {
-        "input_file": str(input_file),
-        "output_file": str(output_file),
-        "dt": float(dt),
-        "name": str(name) if name is not None else None,
-    }
+    # name は無くてもよい（あれば使う）
+    return d
 
 
-def ensure_parent_dir(fp: str):
-    Path(fp).parent.mkdir(parents=True, exist_ok=True)
-
-
-def run_one_seed(
-    *,
-    seed: int,
+def build_cmd(
     stim_path: str,
     resp_path: str,
     dt: float,
-    out_dir: str,
-    objective: str,
     data_name: str,
-    dry_run: bool = False,
-):
+    objective: str,
+    seed_dir: str,
+    seed: int,
+) -> list[str]:
     """
-    1 seed 分だけ BaccusModel.py を Hydra run dir を指定して実行。
-    - response は out_dir/data/response.txt に保存（BaccusModel の data.output_file を差し替え）
+    BaccusModel.py を 1 回叩くコマンドラインを作る。
     """
-    out_dir = str(Path(out_dir))
-    ensure_parent_dir(os.path.join(out_dir, "dummy.txt"))
-
-    resp_out = os.path.join(out_dir, "data", "response.txt")
-    ensure_parent_dir(resp_out)
-
-    # NOTE: ここでは「seed」は環境変数として渡す（BaccusModel 側が使っていない場合もある）
-    env = os.environ.copy()
-    env["PYTHONHASHSEED"] = str(seed)
-    env["NUMPY_RANDOM_SEED"] = str(seed)
-    env["SCIPY_RANDOM_SEED"] = str(seed)
-
     cmd = [
-        "uv", "run", "python", "src/model/BaccusModel.py",
+        "uv",
+        "run",
+        "python",
+        "src/model/BaccusModel.py",
         f"data.input_file={stim_path}",
-        f"data.output_file={resp_out}",
+        f"data.output_file={resp_path}",
         f"data.name={data_name}",
         f"data.dt={dt}",
         f"hyper_params.objective_type={objective}",
-        # もし Hydra 側に optimization.seed があるなら渡しておく（BaccusModel が使っていない場合もある）
-        f"optimization.seed={seed}",
-        f"hydra.run.dir={out_dir}",
+        f"hydra.run.dir={seed_dir}",
     ]
-
-    print("\n" + "=" * 80)
-    print(f"[RUN] seed={seed:02d}")
-    print(f"out_dir   : {out_dir}")
-    print(f"objective : {objective}")
-    print("CMD:", " ".join(cmd))
-    print("=" * 80)
-
-    if dry_run:
-        return 0
-
-    p = subprocess.run(cmd, env=env)
-    return p.returncode
+    return cmd
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Run 30 seeds optimization for cb1/cb2 (single ROI).")
-    ap.add_argument("--data-config", required=True, help="例: config/data/cb1.yaml")
-    ap.add_argument("--objective", required=True, choices=["band_low_only", "band_main_only", "band_full"],
-                    help="目的関数モード")
-    ap.add_argument("--n-seeds", type=int, default=30)
-    ap.add_argument("--seed-start", type=int, default=1)
-    ap.add_argument("--out-root", required=True, help="例: scripts/limit_cb")
-    ap.add_argument("--data-name", default="", help="保存用のデータ名（空ならyamlの data.name を使う。無ければ cbX）")
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(
+        description="cb1/cb2 データを 30 回最適化して BaccusModel の限界を測るツール"
+    )
+    parser.add_argument(
+        "--data-config",
+        required=True,
+        help="cb1.yaml / cb2.yaml などのパス",
+    )
+    parser.add_argument(
+        "--objective",
+        required=True,
+        choices=["band_low_only", "band_main_only", "band_full"],
+        help="目的関数モード（hybrid_objective の objective_mode）",
+    )
+    parser.add_argument(
+        "--n-seeds",
+        type=int,
+        default=30,
+        help="試行する seed の個数（デフォルト: 30）",
+    )
+    parser.add_argument(
+        "--seed-start",
+        type=int,
+        default=1,
+        help="seed の開始番号（デフォルト: 1 → 1..n）",
+    )
+    parser.add_argument(
+        "--out-root",
+        required=True,
+        help="結果を保存するルートディレクトリ (例: scripts/limit_cb)",
+    )
+    parser.add_argument(
+        "--data-name",
+        default="cb_data",
+        help="Hydra/BaccusModel に渡す data.name （実験名ラベル）。未指定なら config の name か 'cb_data'",
+    )
+
+    args = parser.parse_args()
 
     dcfg = load_data_config(args.data_config)
-    stim = dcfg["input_file"]
-    resp = dcfg["output_file"]
-    dt = dcfg["dt"]
 
-    # data_name の決定（優先: CLI > yaml > config filename stem）
-    if args.data_name.strip():
-        data_name = args.data_name.strip()
-    elif dcfg["name"]:
-        data_name = dcfg["name"]
-    else:
-        data_name = Path(args.data_config).stem
+    stim_rel = dcfg["input_file"]
+    resp_rel = dcfg["output_file"]
+    dt = float(dcfg["dt"])
+    yaml_name = dcfg.get("name", None)
 
-    # 入力刺激・応答は「読み取り専用」なので存在チェックだけ
-    if not Path(stim).exists():
-        raise FileNotFoundError(f"stimulus not found: {stim}")
-    if not Path(resp).exists():
-        raise FileNotFoundError(f"response not found: {resp}")
+    # data.name の決定優先度:
+    #  CLI --data-name > yaml の name > "cb_data"
+    data_name = args.data_name or yaml_name or "cb_data"
 
-    out_root = Path(args.out_root)
-    base_dir = out_root / data_name / args.objective
-    base_dir.mkdir(parents=True, exist_ok=True)
+    stim_path = stim_rel
+    resp_path = resp_rel
 
-    # seed ループ
-    failed = 0
-    for i in range(args.n_seeds):
-        seed = args.seed_start + i
-        run_dir = base_dir / f"seed_{seed:02d}"
-        rc = run_one_seed(
-            seed=seed,
-            stim_path=stim,
-            resp_path=resp,
-            dt=dt,
-            out_dir=str(run_dir),
-            objective=args.objective,
-            data_name=data_name,
-            dry_run=args.dry_run,
-        )
-        if rc != 0:
-            failed += 1
-            print(f"[WARN] seed {seed:02d} failed with returncode={rc}")
-
-    print("\n=== main_cb30 done ===")
-    print(f"data_config : {args.data_config}")
+    print("=== main_cb30 ===")
+    print(f"data-config : {args.data_config}")
+    print(f"stim        : {stim_path}")
+    print(f"resp        : {resp_path}")
+    print(f"dt          : {dt}")
     print(f"data_name   : {data_name}")
     print(f"objective   : {args.objective}")
-    print(f"out_dir     : {base_dir}")
-    print(f"seeds       : {args.seed_start} .. {args.seed_start + args.n_seeds - 1}")
-    if failed:
-        print(f"FAILED seeds: {failed}/{args.n_seeds}")
-        sys.exit(2)
+    print(f"n_seeds     : {args.n_seeds} (start={args.seed_start})")
+    print(f"out_root    : {args.out_root}")
+    print("--------------")
+
+    # ルートディレクトリ: scripts/limit_cb/<data_name>/<objective>/
+    base_out = os.path.join(args.out_root, data_name, args.objective)
+    os.makedirs(base_out, exist_ok=True)
+
+    for i in range(args.n_seeds):
+        seed = args.seed_start + i
+        seed_dir = os.path.join(base_out, f"seed_{seed:02d}")
+        os.makedirs(seed_dir, exist_ok=True)
+
+        cmd = build_cmd(
+            stim_path=stim_path,
+            resp_path=resp_path,
+            dt=dt,
+            data_name=data_name,
+            objective=args.objective,
+            seed_dir=seed_dir,
+            seed=seed,
+        )
+
+        print("\n" + "=" * 80)
+        print(f"[RUN] seed={seed}")
+        print("CMD: " + " ".join(cmd))
+        print("=" * 80)
+
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"\n[ERROR] seed={seed} で BaccusModel 実行に失敗しました。")
+            print(f"returncode: {e.returncode}")
+            # 続行（止めたければ break に変える）
+            continue
+
+    print("\n=== main_cb30 DONE ===")
 
 
 if __name__ == "__main__":
