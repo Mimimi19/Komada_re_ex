@@ -129,10 +129,10 @@ if __name__ == "__main__":
     # ==========================================================
     # ▼▼▼ ここを編集すれば切り替えできます ▼▼▼
     # ==========================================================
-    CLUSTER_DIR = "scripts/BaccusMat/cluster_7"
-    ROI_AVE_FILE = "data/ret2p/roi_ave/response_ave_roi7.txt"
+    CLUSTER_DIR = "scripts/limit/seed_10"
+    ROI_AVE_FILE = "data/ret2p/roi_ave/response_ave_roi9.txt"
     DT = 0.015625
-    OUT_NAME = "cluster_7.png"
+    OUT_NAME = "cluster_9.png"
     # ==========================================================
 
     main(CLUSTER_DIR, roi_ave_file=ROI_AVE_FILE, dt=DT, out_name=OUT_NAME)

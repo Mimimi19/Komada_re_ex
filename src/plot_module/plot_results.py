@@ -399,8 +399,8 @@ if __name__ == "__main__":
     # ▼▼▼ ここに使用するデータと結果フォルダの詳細を入力してください ▼▼▼
     # =================================================================
 
-    TARGET_CONFIG = "config/data/ret2p-1.yaml"
-    TARGET_DIR = "scripts/ret2p/20251219_2302"
+    TARGET_CONFIG = "scripts/limit/seed_12/main.yaml"
+    TARGET_DIR = "scripts/limit/seed_12"
     TARGET_TAU = 1.0
 
     # =================================================================
