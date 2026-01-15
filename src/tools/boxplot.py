@@ -8,13 +8,19 @@ src/tools/boxplot.py
 
 使い方:
   uv run python src/tools/boxplot.py
-  uv run python src/tools/boxplot.py --base scripts/limit_full
+  uv run python src/tools/boxplot.py --base scripts/limit/roi_1/band_full
 """
 import os
 import argparse
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+
+# 日本語フォント対応
+try:
+    import japanize_matplotlib
+except ImportError:
+    pass
 
 def _read_float(path: str):
     try:
@@ -176,8 +182,8 @@ def main():
     fig = plt.figure(figsize=(7, 4.5))
     ax = fig.add_subplot(111)
     ax.boxplot(corr, vert=True, showmeans=True)
-    ax.set_title("Objective distribution across seeds")
-    ax.set_ylabel("Objective value (as saved in correlation.txt)")
+    ax.set_title("最適化後の相関係数の分布", fontsize=14)
+    ax.set_ylabel("最適化後の相関係数")
     ax.set_xticks([1])
     ax.set_xticklabels([os.path.basename(base_dir)])
 

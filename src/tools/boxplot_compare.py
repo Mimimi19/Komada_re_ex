@@ -1,169 +1,180 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 src/tools/boxplot_compare.py
 
-同一 ROI 内の複数 objective（例: band_low_only / band_main_only）の
-最終スコア(correlation.txt) を集計して、箱ひげ図を横並びで描画します。
+複数 ROI の band_full の seed_* / correlation.txt を読み込み，
+横に並んだ箱ひげ図として比較し PDF 保存する。
 
-- low / main がどちらか分かるようにラベル表示
-- 薄い破線グリッドを追加（値が読みやすい）
-- PNG と LaTeX(.tex) を出力
-
-使い方:
-  uv run python src/tools/boxplot_compare.py --roi-dir scripts/limit/roi_1
-  uv run python src/tools/boxplot_compare.py --roi-dir scripts/limit/roi_1 --objectives band_low_only,band_main_only
-
-出力:
-  scripts/limit/roi_1/boxplot_compare/boxplot_compare.png
-  scripts/limit/roi_1/boxplot_compare/boxplot_compare.tex
-  scripts/limit/roi_1/boxplot_compare/summary_stats.tsv
+実行例:
+    uv run python src/tools/boxplot_compare.py \
+        --base scripts/limit \
+        --roi "1,2,13,14"
 """
-import argparse
+
 import os
+import argparse
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 日本語フォント対応
 try:
     import japanize_matplotlib
 except ImportError:
     pass
 
 
-def _read_scores(obj_dir: str):
-    """obj_dir/seed_*/correlation.txt を読み、float 配列で返す"""
-    pattern = os.path.join(obj_dir, "seed_*", "correlation.txt")
-    files = sorted(glob.glob(pattern))
-    vals = []
-    for fp in files:
-        try:
-            v = float(np.loadtxt(fp))
-            # correlation.txt は「最大化したい相関係数」を保存している前提
-            vals.append(v)
-        except Exception:
-            pass
-    return np.array(vals, dtype=float), files
+# -------------------------------
+# correlation.txt の読み込み
+# -------------------------------
+def _read_float(path: str):
+    try:
+        s = open(path, "r", encoding="utf-8").read().strip()
+        for tok in s.replace(",", " ").split():
+            try:
+                return float(tok)
+            except Exception:
+                pass
+        return float(s)
+    except Exception:
+        return None
 
-def _stats(x: np.ndarray):
-    if x.size == 0:
-        return dict(n=0, mean=np.nan, std=np.nan, q05=np.nan, q50=np.nan, q95=np.nan, best=np.nan)
-    return dict(
-        n=int(x.size),
-        mean=float(np.mean(x)),
-        std=float(np.std(x)),
-        q05=float(np.quantile(x, 0.05)),
-        q50=float(np.quantile(x, 0.50)),
-        q95=float(np.quantile(x, 0.95)),
-        best=float(np.max(x)),
-    )
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--roi-dir", required=True, help="例: scripts/limit/roi_1")
-    ap.add_argument("--objectives", default="band_low_only,band_main_only",
-                    help="カンマ区切り（例: band_low_only,band_main_only,band_full）")
-    ap.add_argument("--outdir", default="", help="出力先（空なら roi-dir/boxplot_compare）")
-    args = ap.parse_args()
+def read_roi_correlations(path_band_full: str):
+    """band_full 配下から correlation を読み込む"""
+    corrs = []
+    seed_ok = []
+    seed_err = []
 
-    roi_dir = args.roi_dir.rstrip("/")
-    objectives = [s.strip() for s in args.objectives.split(",") if s.strip()]
-    if not objectives:
-        raise SystemExit("No objectives given.")
-
-    outdir = args.outdir.strip() or os.path.join(roi_dir, "boxplot_compare")
-    os.makedirs(outdir, exist_ok=True)
-
-    # 収集
-    data = []
-    labels = []
-    stats_rows = []
-    for obj in objectives:
-        obj_dir = os.path.join(roi_dir, obj)
-        scores, files = _read_scores(obj_dir)
-        data.append(scores)
-        labels.append(obj)
-
-        st = _stats(scores)
-        stats_rows.append((obj, st["n"], st["best"], st["q95"], st["q50"], st["q05"], st["mean"], st["std"]))
-
-        print(f"[{obj}] n={st['n']} best={st['best']:.6f} q95={st['q95']:.6f} median={st['q50']:.6f}")
-
-    # TSV保存（論文用にコピペしやすい）
-    tsv_path = os.path.join(outdir, "summary_stats.tsv")
-    with open(tsv_path, "w", encoding="utf-8") as f:
-        f.write("objective\tn\tbest\tq95\tmedian\tq05\tmean\tstd\n")
-        for row in stats_rows:
-            f.write("\t".join([str(x) for x in row]) + "\n")
-
-    # プロット
-    plt.figure(figsize=(max(6, 1.8 * len(objectives)), 5.2))
-    ax = plt.gca()
-
-    # 箱ひげ図（横並び）
-    positions = np.arange(1, len(objectives) + 1)
-    bp = ax.boxplot(
-        data,
-        positions=positions,
-        widths=0.55,
-        patch_artist=True,
-        showfliers=True,
-        medianprops=dict(linewidth=2),
-        boxprops=dict(linewidth=1.5),
-        whiskerprops=dict(linewidth=1.2),
-        capprops=dict(linewidth=1.2),
-    )
-
-    # 色指定はしない（要望: 色固定しない）。ただし塗りは薄い灰で統一して可読性を確保
-    for b in bp["boxes"]:
-        b.set_alpha(0.35)
-
-    ax.set_xticks(positions)
-    # 低/主が分かるようにラベル（そのまま objective 名）
-    ax.set_xticklabels(labels, rotation=0)
-
-    ax.set_title(os.path.basename(roi_dir) + "における周波数帯ごとの最適化結果比較")
-    ax.set_ylabel("最適化後のスピアマンの相関係数")
-
-    # 読みやすいグリッド：薄い破線
-    ax.grid(True, which="both", axis="y", linestyle="--", linewidth=0.7, alpha=0.35)
-
-    # 目盛りも少し増やす（グリッドが見やすい）
-    ax.minorticks_on()
-    ax.grid(True, which="minor", axis="y", linestyle="--", linewidth=0.5, alpha=0.18)
-
-    # median 値を上に表示（数値が分かりづらい問題に対処）
-    for i, scores in enumerate(data, start=1):
-        if scores.size == 0:
+    seed_dirs = sorted(glob.glob(os.path.join(path_band_full, "seed_*")))
+    for sd in seed_dirs:
+        sname = os.path.basename(sd)
+        cpath = os.path.join(sd, "correlation.txt")
+        if not os.path.exists(cpath):
+            seed_err.append((sname, "missing"))
             continue
-        med = float(np.quantile(scores, 0.5))
-        ax.text(i, med, f"{med:.3f}", ha="center", va="bottom", fontsize=9)
 
-    pdf_path = os.path.join(outdir, "boxplot_compare.pdf")
-    plt.tight_layout()
-    pdf_path = os.path.join(outdir, "boxplot_compare.pdf")
-    plt.savefig(pdf_path, bbox_inches="tight")
+        v = _read_float(cpath)
+        if v is None or not np.isfinite(v):
+            seed_err.append((sname, "parse_error"))
+            continue
 
-    plt.close()
+        corrs.append(v)
+        seed_ok.append(sname)
 
-    # LaTeX snippet
-    tex_path = os.path.join(outdir, "boxplot_compare.tex")
-    tex = r"""\begin{figure}[t]
-    \centering
-    \includegraphics[width=\linewidth]{%s}
-    \caption{Objective comparison (boxplots) for %s.}
-    \label{fig:%s_objective_boxplot}
-    \end{figure}
-     """ % (os.path.basename(pdf_path), os.path.basename(roi_dir), os.path.basename(roi_dir))
+    return np.array(corrs, float), seed_ok, seed_err
 
-    with open(tex_path, "w", encoding="utf-8") as f:
+
+# -------------------------------
+# LaTeX snippet
+# -------------------------------
+def save_latex_snippet(out_tex, pdf_name, title):
+    tex = f"""\\begin{{figure}}[t]
+  \\centering
+  \\includegraphics[width=0.95\\linewidth]{{{pdf_name}}}
+  \\caption{{{title}}}
+  \\label{{fig:{os.path.splitext(pdf_name)[0]}}}
+\\end{{figure}}
+"""
+    with open(out_tex, "w", encoding="utf-8") as f:
         f.write(tex)
 
-    print("\nSaved:")
-    print("  " + pdf_path)
-    print("  " + tex_path)
-    print("  " + tsv_path)
+
+# -------------------------------
+# main
+# -------------------------------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", required=True,
+                    help="例: scripts/limit")
+    ap.add_argument("--roi", required=True,
+                    help="例: \"1,2,13,14\"")
+    ap.add_argument("--objective", default="band_full",
+                    help="使用する目的関数ディレクトリ (default: band_full)")
+    args = ap.parse_args()
+
+    base_dir = args.base
+    roi_list = [int(x) for x in args.roi.replace(" ", "").split(",") if x != ""]
+    objective = args.objective
+
+    out_dir = os.path.join(base_dir, "boxplot_compare")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # -------------------------------
+    # ROIごとに correlation を読み込み
+    # -------------------------------
+    roi_corrs = []
+    roi_labels = []
+    roi_errs = {}
+
+    for roi in roi_list:
+        path = os.path.join(base_dir, f"roi_{roi}", objective)
+        if not os.path.isdir(path):
+            print(f"[WARN] directory not found: {path}")
+            continue
+
+        corr, seeds_ok, seeds_err = read_roi_correlations(path)
+        roi_corrs.append(corr)
+        roi_labels.append(f"ROI {roi}")
+        roi_errs[roi] = seeds_err
+
+        print(f"[OK] ROI {roi}: {len(corr)} values, {len(seeds_err)} errors")
+
+    if len(roi_corrs) == 0:
+        print("ERROR: 有効な ROI がありません。")
+        return
+
+    # -------------------------------
+    # PDF プロット
+    # -------------------------------
+    fig = plt.figure(figsize=(10, 5))
+    ax = fig.add_subplot(111)
+
+    ax.boxplot(roi_corrs, labels=roi_labels, showmeans=True, vert=True)
+    ax.set_title("ROI comparison (objective: {})".format(objective), fontsize=14)
+    ax.set_ylabel("Correlation")
+    ax.grid(True, linestyle="--", alpha=0.3)
+
+    pdf_name = "compare_roi_" + "_".join([str(r) for r in roi_list]) + ".pdf"
+    pdf_path = os.path.join(out_dir, pdf_name)
+
+    plt.tight_layout()
+    plt.savefig(pdf_path)
+    plt.close(fig)
+
+    # -------------------------------
+    # 数値のまとめ
+    # -------------------------------
+    stat_path = os.path.join(out_dir, "stats_compare.txt")
+    with open(stat_path, "w", encoding="utf-8") as f:
+        f.write(f"objective={objective}\n")
+        f.write(f"ROI list={roi_list}\n\n")
+
+        for roi, c in zip(roi_list, roi_corrs):
+            if len(c) == 0:
+                f.write(f"ROI {roi}: no data\n\n")
+                continue
+
+            f.write(f"[ROI {roi}]\n")
+            f.write(f"n = {len(c)}\n")
+            f.write(f"mean = {np.mean(c):.6f}\n")
+            f.write(f"median = {np.median(c):.6f}\n")
+            f.write(f"max = {np.max(c):.6f}\n")
+            f.write(f"min = {np.min(c):.6f}\n")
+            f.write(f"errors = {roi_errs.get(roi)}\n\n")
+
+    # -------------------------------
+    # LaTeX snippet 出力
+    # -------------------------------
+    tex_path = os.path.join(out_dir, pdf_name.replace(".pdf", ".tex"))
+    save_latex_snippet(tex_path, pdf_name,
+                       f"ROI comparison ({objective})")
+
+    print("\n=== boxplot_compare DONE ===")
+    print("out_dir :", out_dir)
+    print("saved   :", pdf_path)
+    print("saved   :", tex_path)
+    print("saved   :", stat_path)
+
 
 if __name__ == "__main__":
     main()
