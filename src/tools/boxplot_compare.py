@@ -17,6 +17,8 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
+from matplotlib.lines import Line2D  # ★ 凡例用のダミーオブジェクトに使う
+
 try:
     import japanize_matplotlib
 except ImportError:
@@ -114,7 +116,12 @@ def main():
 
         corr, seeds_ok, seeds_err = read_roi_correlations(path)
         roi_corrs.append(corr)
-        roi_labels.append(f"ROI {roi}")
+        if roi <= 5:
+            roi_labels.append(f"ROI {roi}(OFF)")
+        elif roi >= 14:
+            roi_labels.append(f"ROI {roi}(RBC)")
+        else:
+            roi_labels.append(f"ROI {roi}(ON)")
         roi_errs[roi] = seeds_err
 
         print(f"[OK] ROI {roi}: {len(corr)} values, {len(seeds_err)} errors")
@@ -129,10 +136,23 @@ def main():
     fig = plt.figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
 
-    ax.boxplot(roi_corrs, labels=roi_labels, showmeans=True, vert=True)
-    ax.set_title("ROI comparison (objective: {})".format(objective), fontsize=14)
-    ax.set_ylabel("Correlation")
+    # showmeans=True なので「緑三角 = 平均」「白丸 = 外れ値」が描かれる
+    bp = ax.boxplot(roi_corrs, labels=roi_labels, showmeans=True, vert=False)
+    ax.set_title(f"ROI 毎の相関係数の分布", fontsize=14)
+    ax.set_xlabel("相関係数")
     ax.grid(True, linestyle="--", alpha=0.3)
+
+    # --- 凡例（緑三角=平均, 白丸=外れ値）を明示 ---
+    mean_proxy = Line2D(
+        [], [], marker="^", color="green", linestyle="None",
+        markersize=8, label="平均値 (mean)"
+    )
+    outlier_proxy = Line2D(
+        [], [], marker="o", color="black", linestyle="None",
+        markerfacecolor="white", markersize=6, label="外れ値 (outlier)"
+    )
+    ax.legend(handles=[mean_proxy, outlier_proxy], loc="lower left", fontsize=10)
+    ax.tick_params(labelsize=10)
 
     pdf_name = "compare_roi_" + "_".join([str(r) for r in roi_list]) + ".pdf"
     pdf_path = os.path.join(out_dir, pdf_name)
