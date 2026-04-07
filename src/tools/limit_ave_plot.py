@@ -1,40 +1,95 @@
+# src/tools/limit_ave_plot.py
 # -*- coding: utf-8 -*-
 """
-src/tools/limit_ave_plot.py
+各 ROI について、教師データ（平均応答）と
+各 seed の A_state(t)（=Kinetics ブロックの活性状態）を比較するプロットを作るツール。
 
-ROI平均（例: data/ret2p/roi_ave/response_ave_roi1.txt）と、
-limit 実験（scripts/limit/roi_1/band_full/seed_*/state/A_state.txt）
-の複数本を同一グラフに重ね、平均との差も表示して保存する。
+(1) 全 seed overlay + 平均 + 教師データ
+(2) 相関係数が最大の「ベスト seed」だけを重ねたプロット
 
-- 予測は「state/A_state.txt」を使用
-- 正規化: 平均0、max|x|=1
-- 出力: scripts/limit/roi_{roi}/{objective}/ave_plot/ に pdf と LaTeX .tex を保存
+想定ディレクトリ構造:
+    <root_dir>/
+      roi_1/
+        band_full/
+          seed_01/
+            state/A_state.txt
+            correlation.txt
+          ...
+          seed_30/
+            ...
+      ...
+      roi_14/
+        band_full/
+          ...
 
-使い方例:
-  # ROI 1, band_full
-  uv run python src/tools/limit_ave_plot.py --roi 1 --objective band_full
+教師データ (ROI 平均応答):
+    data/ret2p/roi_ave/response_ave_roi{roi}.txt
 
-  # ROI 13, band_full
-  uv run python src/tools/limit_ave_plot.py --roi 13 --objective band_full
+出力:
+    <root_dir>/roi_<ROI>/<objective>/ave_plot/
+      limit_ave_plot.pdf             ... 全 seed overlay + 平均 + 教師
+      limit_ave_plot_best_seed.pdf   ... ベスト seed のみ + 教師
+      limit_ave_best_seed.txt        ... ベスト seed と相関係数
 
-  # ルートディレクトリを変えたい場合（必要なら）
-  uv run python src/tools/limit_ave_plot.py --roi 1 --objective band_full --base-root scripts/limit_full
+使い方:
+    # ROI 1〜14 をまとめて処理
+    uv run python src/tools/limit_ave_plot.py scripts/limit
+
+    # 特定 ROI だけ処理
+    uv run python src/tools/limit_ave_plot.py scripts/limit --roi 11
+
+    # 目的関数ディレクトリを変える場合
+    uv run python src/tools/limit_ave_plot.py scripts/limit --objective band_low_only
 """
+
 import os
-import argparse
+import sys
 import glob
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 日本語フォント対応
 try:
     import japanize_matplotlib  # noqa: F401
 except ImportError:
     pass
 
+# ----------------------------------------------------------
+# ROI → ラベル
+# ----------------------------------------------------------
+ROI_LABELS = {
+    1:  "ROI 1  CBC1 (OFF)",
+    2:  "ROI 2  CBC2 (OFF)",
+    3:  "ROI 3  CBC3a (OFF)",
+    4:  "ROI 4  CBC3b (OFF)",
+    5:  "ROI 5  CBC4 (OFF)",
+    6:  "ROI 6  CBC5t (ON)",
+    7:  "ROI 7  CBC5o (ON)",
+    8:  "ROI 8  CBC5i (ON)",
+    9:  "ROI 9  CBCX (ON)",
+    10: "ROI10 CBC6 (ON)",
+    11: "ROI11 CBC7 (ON)",
+    12: "ROI12 CBC8 (ON)",
+    13: "ROI13 CBC9 (ON)",
+    14: "ROI14 RBC (ON)",
+}
 
-def normalize_zero_mean_max1(x: np.ndarray) -> np.ndarray:
-    x = np.asarray(x, dtype=float)
+
+def _safe_path_arg(arg: str) -> str:
+    if arg.startswith("-") and os.path.exists(arg[1:]):
+        return arg[1:]
+    return arg
+
+
+def _load_1d_txt(path: str) -> np.ndarray:
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    return np.genfromtxt(path).astype(float)
+
+
+def _normalize_zero_mean_max1(x: np.ndarray) -> np.ndarray:
+    """平均0・最大絶対値1 に正規化。"""
+    x = np.asarray(x, float)
     x = x - np.mean(x)
     m = np.max(np.abs(x))
     if m > 1e-12:
@@ -42,191 +97,240 @@ def normalize_zero_mean_max1(x: np.ndarray) -> np.ndarray:
     return x
 
 
-def load_1d_txt(path: str) -> np.ndarray:
-    return np.loadtxt(path, dtype=float)
+def _read_corr(seed_dir: str):
+    path = os.path.join(seed_dir, "correlation.txt")
+    if not os.path.exists(path):
+        return None
+    try:
+        return float(np.genfromtxt(path))
+    except Exception:
+        return None
 
 
-def save_latex_snippet(out_tex: str, pdf_name: str, title: str):
-    tex = f"""\\begin{{figure}}[t]
-  \\centering
-  \\includegraphics[width=0.98\\linewidth]{{{pdf_name}}}
-  \\caption{{{title}}}
-  \\label{{fig:{os.path.splitext(os.path.basename(pdf_name))[0]}}}
-\\end{{figure}}
-"""
-    with open(out_tex, "w", encoding="utf-8") as f:
-        f.write(tex)
-
-
-def collect_astates(base_dir: str):
+def collect_astates_and_best(base_dir: str):
     """
-    base_dir/seed_*/state/A_state.txt をすべて読む
+    base_dir (= scripts/limit/roi_X/band_full など) 以下の seed_* を走査して
+    A_state(t) とベスト seed を集計する。
+
+    Returns
+    -------
+    traces : list[np.ndarray]
+        各 seed の A_state 生データ（まだ正規化・長さ調整前）
+    seeds  : list[int]
+        traces と同じ順序の seed 番号
+    best_seed : int | None
+        correlation.txt が最大の seed 番号（見つからなければ None）
+    best_corr : float | None
+        best_seed の相関係数
     """
     traces = []
-    seed_names = []
-    for seed_dir in sorted(glob.glob(os.path.join(base_dir, "seed_*"))):
-        apath = os.path.join(seed_dir, "state", "A_state.txt")
-        if not os.path.exists(apath):
+    seeds = []
+    best_seed = None
+    best_corr = None
+
+    seed_dirs = sorted(glob.glob(os.path.join(base_dir, "seed_*")))
+    for sd in seed_dirs:
+        base = os.path.basename(sd)
+        try:
+            seed_num = int(base.split("_")[1])
+        except Exception:
             continue
-        a = load_1d_txt(apath)
-        traces.append(a)
-        seed_names.append(os.path.basename(seed_dir))
-    return traces, seed_names
+
+        a_path = os.path.join(sd, "state", "A_state.txt")
+        if not os.path.exists(a_path):
+            continue
+        try:
+            trace = np.genfromtxt(a_path).astype(float)
+        except Exception:
+            continue
+
+        traces.append(trace)
+        seeds.append(seed_num)
+
+        # 相関係数
+        corr = _read_corr(sd)
+        if corr is not None and np.isfinite(corr):
+            if (best_corr is None) or (corr > best_corr):
+                best_corr = float(corr)
+                best_seed = seed_num
+
+    return traces, seeds, best_seed, best_corr
 
 
-def main(roi: int):
-    # ==========================================================
-    # ▼▼▼ ここの定数は基本いじらない想定 ▼▼▼
-    # ==========================================================
-    DEFAULT_BASE_ROOT = "scripts/limit"  # この直下に roi_1, roi_2, ... がある前提
-    DEFAULT_ROI = roi if roi else 1
-    DEFAULT_OBJECTIVE = "band_full"      # band_low_only / band_main_only / band_full など
-    RESPONSE_AVE_TEMPLATE = "data/ret2p/roi_ave/response_ave_roi{roi}.txt"
-    DT = 0.015625  # 64Hz 前提（固定）
-    OUT_SUBDIR = "ave_plot"
-    # ==========================================================
-    # ROI → ラベル（x軸に表示する文字列）
-    ROI_LABELS = {
-        1:  "ROI 1  CBC1 (OFF)",
-        2:  "ROI 2  CBC2 (OFF)",
-        3:  "ROI 3  CBC3a (OFF)",
-        4:  "ROI 4  CBC3b (OFF)",
-        5:  "ROI 5  CBC4 (OFF)",
-        6:  "ROI 6  CBC5t (ON)",
-        7:  "ROI 7  CBC5o (ON)",
-        8:  "ROI 8  CBC5i (ON)",
-        9:  "ROI 9  CBCX (ON)",
-        10: "ROI10 CBC6 (ON)",
-        11: "ROI11 CBC7 (ON)",
-        12: "ROI12 CBC8 (ON)",
-        13: "ROI13 CBC9 (ON)",
-        14: "ROI14 RBC (ON)",
-    }
-    # ==========================================================
+def _plot_all_seeds(resp_n, preds_n, t, out_path: str, roi_label: str):
+    fig = plt.figure(figsize=(10, 5))
+    ax = fig.add_subplot(1, 1, 1)
+
+    # 全 seed の A_state
+    for y in preds_n:
+        ax.plot(t, y, color="tab:green", alpha=0.25, linewidth=0.7)
+
+    # 予測平均
+    if preds_n:
+        mean_pred = np.mean(np.stack(preds_n, axis=0), axis=0)
+        ax.plot(t, mean_pred, color="tab:red", linewidth=1.8, label="予測平均 (A_state)")
+
+    # 教師データ
+    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="教師データ (ROI 平均応答)")
+
+    ax.set_title(f"LNKモデルの予測応答とROIごとの平均応答 (全 seed) - {roi_label}")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Normalized response")
+    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(loc="upper right", fontsize=9)
+    ax.tick_params(labelsize=10)
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
 
 
+def _plot_best_seed(resp_n, best_pred, t, out_path: str, roi_label: str, best_seed: int | None, best_corr: float | None):
+    fig = plt.figure(figsize=(10, 5))
+    ax = fig.add_subplot(1, 1, 1)
+
+    # ベスト seed の A_state
+    ax.plot(t, best_pred, color="tab:green", linewidth=1.8,
+            label=f"Best seed (A_state)")
+
+    # 教師データ
+    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="教師データ (ROI 平均応答)")
+
+    title_extra = ""
+    if best_seed is not None:
+        title_extra += f"seed={best_seed:02d}"
+    if best_corr is not None:
+        if title_extra:
+            title_extra += ", "
+        title_extra += f"corr={best_corr:.3f}"
+
+    if title_extra:
+        title = f"LNK A_state vs ROI 平均応答 (best) - {roi_label}\n({title_extra})"
+    else:
+        title = f"LNK A_state vs ROI 平均応答 (best) - {roi_label}"
+
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Normalized response")
+    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(loc="upper right", fontsize=9)
+    ax.tick_params(labelsize=10)
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def run_for_one_roi(root_dir: str, roi: int, objective: str, dt: float = 0.015625):
+    base_dir = os.path.join(root_dir, f"roi_{roi}", objective)
+    if not os.path.isdir(base_dir):
+        print(f"[WARN] base_dir が存在しません: {base_dir}")
+        return
+
+    # 教師データ
+    resp_path = os.path.join("data", "ret2p", "roi_ave", f"response_ave_roi{roi}.txt")
+    try:
+        resp = _load_1d_txt(resp_path)
+    except FileNotFoundError:
+        print(f"[WARN] 教師データが見つかりません: {resp_path}")
+        return
+
+    traces, seeds, best_seed, best_corr = collect_astates_and_best(base_dir)
+    if not traces:
+        print(f"[WARN] ROI {roi}: A_state が 1 本も見つかりませんでした。")
+        return
+
+    # 長さ揃え & 正規化
+    min_len = min(len(resp), *(len(tr) for tr in traces))
+    resp = resp[:min_len]
+    resp_n = _normalize_zero_mean_max1(resp)
+
+    preds_n = []
+    best_pred_n = None
+
+    for tr, s in zip(traces, seeds):
+        tr = tr[:min_len]
+        tr_n = _normalize_zero_mean_max1(tr)
+        preds_n.append(tr_n)
+        if best_seed is not None and s == best_seed:
+            best_pred_n = tr_n
+
+    # best_seed が見つからなかった場合は 1本目を採用
+    if best_pred_n is None:
+        best_pred_n = preds_n[0]
+        if best_seed is None and seeds:
+            best_seed = seeds[0]
+
+    t = np.arange(min_len) * dt
+    roi_label = ROI_LABELS.get(roi, f"ROI {roi}")
+
+    out_dir = os.path.join(base_dir, "ave_plot")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # (1) 全 seed overlay → PDF
+    out_pdf_all = os.path.join(out_dir, "limit_ave_plot.pdf")
+    _plot_all_seeds(resp_n, preds_n, t, out_pdf_all, roi_label)
+
+    # (2) ベスト seed → PDF
+    out_pdf_best = os.path.join(out_dir, "limit_ave_plot_best_seed.pdf")
+    _plot_best_seed(resp_n, best_pred_n, t, out_pdf_best, roi_label, best_seed, best_corr)
+
+    # ベスト seed 情報をテキスト出力
+    best_info_path = os.path.join(out_dir, "limit_ave_best_seed.txt")
+    with open(best_info_path, "w", encoding="utf-8") as f:
+        f.write("# best seed by correlation\n")
+        f.write(f"best_seed = {best_seed}\n")
+        f.write(f"best_corr = {best_corr}\n")
+        f.write(f"seeds     = {seeds}\n")
+
+    print(f"=== limit_ave_plot DONE for ROI {roi} ===")
+    print(f"  base_dir  : {base_dir}")
+    print(f"  out_dir   : {out_dir}")
+    print(f"  seeds     : {seeds}")
+    print(f"  best_seed : {best_seed} (corr={best_corr})")
+
+
+def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--roi", type=int, default=DEFAULT_ROI,
-                    help="ROI番号（例: 1, 13, 14 ...）")
+    ap.add_argument(
+        "root_dir",
+        help="例: scripts/limit （内部で roi_1〜roi_14/<objective>/seed_*/ を検索）",
+    )
     ap.add_argument(
         "--objective",
         type=str,
-        default=DEFAULT_OBJECTIVE,
-        help="目的関数モードに対応したサブディレクトリ名 "
-             "(例: band_low_only, band_main_only, band_full)",
+        default="band_full",
+        help="目的関数ディレクトリ名 (default: band_full)",
     )
     ap.add_argument(
-        "--base-root",
-        type=str,
-        default=DEFAULT_BASE_ROOT,
-        help="roi_*/<objective> がぶら下がるルートディレクトリ (デフォルト: scripts/limit)",
+        "--roi",
+        type=int,
+        help="特定 ROI のみ処理したい場合に指定 (1〜14)。未指定なら全 ROI を処理。",
+    )
+    ap.add_argument(
+        "--dt",
+        type=float,
+        default=0.015625,
+        help="時間刻み (s)。デフォルト 1/64 ≒ 0.015625。",
     )
     args = ap.parse_args()
 
-    roi = args.roi
+    root_dir = _safe_path_arg(args.root_dir)
     objective = args.objective
-    base_root = args.base_root
+    dt = float(args.dt)
 
-    # base_dir = <base_root>/roi_{roi}/<objective>
-    base_dir = os.path.join(base_root, f"roi_{roi}", objective)
+    if not os.path.isdir(root_dir):
+        print(f"ERROR: root_dir が存在しません: {root_dir}")
+        sys.exit(1)
 
-    if not os.path.isdir(base_dir):
-        raise SystemExit(f"[Error] base_dir not found: {base_dir}")
+    if args.roi is not None:
+        roi_list = [int(args.roi)]
+    else:
+        roi_list = list(range(1, 15))
 
-    # ROI 平均応答
-    resp_path = RESPONSE_AVE_TEMPLATE.format(roi=roi)
-    if not os.path.exists(resp_path):
-        raise SystemExit(f"[Error] ROI average response not found: {resp_path}")
-
-    resp = load_1d_txt(resp_path)
-
-    # seed_* から A_state を集める
-    traces, seed_names = collect_astates(base_dir)
-
-    if len(traces) == 0:
-        raise SystemExit("[Error] No A_state.txt found under seed_*/state/")
-
-    # 長さを揃える
-    min_len = min([len(resp)] + [len(t) for t in traces])
-    resp = resp[:min_len]
-    traces = [t[:min_len] for t in traces]
-
-    # 正規化
-    resp_n = normalize_zero_mean_max1(resp)
-    traces_n = [normalize_zero_mean_max1(t) for t in traces]
-    mean_pred = normalize_zero_mean_max1(np.mean(np.vstack(traces_n), axis=0))
-
-    # 時間軸
-    t_axis = np.arange(min_len) * DT
-
-    # 出力ディレクトリ
-    out_dir = os.path.join(base_dir, OUT_SUBDIR)
-    os.makedirs(out_dir, exist_ok=True)
-
-    # プロット
-    fig = plt.figure(figsize=(12, 4.8))
-    ax = fig.add_subplot(111)
-
-    # すべての seed を薄い緑で
-    for tr in traces_n:
-        ax.plot(t_axis, tr, color="green", alpha=0.5, linewidth=1.0)
-
-    # 予測平均（赤）
-    ax.plot(
-        t_axis,
-        mean_pred,
-        color="red",
-        alpha=1.0,
-        linewidth=2.0,
-        label="予測応答平均",
-    )
-    # ROI 平均応答（青）
-    ax.plot(
-        t_axis,
-        resp_n,
-        color="blue",
-        alpha=1.0,
-        linewidth=2.0,
-        label=f"ROI{roi}の平均応答",
-    )
-
-    ax.set_title(
-        f"{ROI_LABELS[roi]}における30試行の予測応答とROI平均応答の重ね合わせ "
-    )
-    ax.set_xlabel("時間 (s)")
-    ax.set_ylabel("正規化後の振幅 (mean=0, max|x|=1)")
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper right")
-    ax.tick_params(labelsize=10)
-
-    plt.tight_layout()
-    pdf_path = os.path.join(out_dir, "limit_ave_plot.pdf")
-    plt.savefig(pdf_path, bbox_inches="tight")
-    plt.close(fig)
-
-    # LaTeX figure snippet
-    tex_path = os.path.join(out_dir, "limit_ave_plot.tex")
-    save_latex_snippet(
-        out_tex=tex_path,
-        pdf_name="limit_ave_plot.pdf",
-        title=f"ROI{roi}: overlay of optimized A-state traces and ROI-average response "
-              f"({objective}).",
-    )
-
-    # 数値も保存（念のため）
-    np.savetxt(os.path.join(out_dir, "pred_mean_normalized.txt"), mean_pred, fmt="%.6f")
-    np.savetxt(os.path.join(out_dir, "response_ave_normalized.txt"), resp_n, fmt="%.6f")
-
-    print("=== limit_ave_plot ===")
-    print(f"base_root: {base_root}")
-    print(f"base_dir : {base_dir}")
-    print(f"roi      : {roi}")
-    print(f"objective: {objective}")
-    print(f"out_dir  : {out_dir}")
-    print(f"saved    : {pdf_path}")
-    print(f"saved    : {tex_path}")
+    for roi in roi_list:
+        print("----------------------------------------")
+        print(f"[RUN] ROI {roi}")
+        run_for_one_roi(root_dir, roi, objective, dt=dt)
 
 
 if __name__ == "__main__":
-    for roi in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]:
-        main(roi=roi)
+    main()
