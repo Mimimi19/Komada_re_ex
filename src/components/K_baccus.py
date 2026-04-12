@@ -81,7 +81,7 @@ def main(time_steps, u_input, dt,
     """
     # flush=Trueで、バッファリングされずにすぐ表示されるようにする
     # end='\r'で描き終わったらカーソルを行頭に戻す
-    print(f'Running: K_Model({label})', end='\r', flush=True)
+    print(f'\r\033[Running: K_Model({label})', end='\r', flush=True)
 
     # Numbaで最適化されたコア計算ループを呼び出す
     R_state, A_state, I1_state, I2_state, check, last_idx = _simulation_loop_jit(
@@ -90,9 +90,6 @@ def main(time_steps, u_input, dt,
         ka, kfi, kfr, ksi, ksr
     )
 
-    # 計算が終わったら、"Running..."の表示を空白で上書きして消す
-    # 80文字分の空白で多くのターミナル幅をカバーできる
-    print(" " * 80, end='\r', flush=True)
 
     # 計算が途中で失敗した場合、結果を正しい長さでスライスする
     if check == 0:

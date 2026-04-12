@@ -52,7 +52,7 @@ def main(alphas, delta, t, dt, tau):
     - kernel[::-1]: 畳み込み用に反転されたカーネル
     - t_values[::-1]: 反転された時間軸
     """
-    # print(f"Linear Model -                 -                is being processed.", end='\r', flush=True)
+    # print(f"\r\033[Linear Model -                 -                is being processed.", end='\r', flush=True)
     # alphasの長さが基底関数の総数 J となります
     J = len(alphas) 
     
@@ -65,7 +65,7 @@ def main(alphas, delta, t, dt, tau):
     #全ての基底関数の計算 (j=1 から J まで)
     # f_x_matrix の shape は (J-1) x len(shifted_t)
     f_x_matrix = BasisFunctions.main(shifted_t, J , tau)
-    f_x_matrix = QR_orthogonalization(f_x_matrix)
+    # f_x_matrix = QR_orthogonalization(f_x_matrix)　#直行化させると複雑になってしまうため、今回はそのまま使用します。
     #カーネルの計算 F_LNK (t) = Σ α_j f_x(t, j)
     kernel = np.dot(alphas, f_x_matrix)
 
