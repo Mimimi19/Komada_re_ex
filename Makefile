@@ -1,7 +1,7 @@
 .PHONY: init
 
 init:
-	git clone https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
+	git clone -b Segment_learning https://github.com/Mimimi19/Komada_re_ex.git Re_experiment
 	cd Re_experiment
 	@echo ".envとca.crtの設定を行ってください。"
 

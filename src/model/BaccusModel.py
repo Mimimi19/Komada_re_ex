@@ -346,7 +346,7 @@ class BaccusOptimizer:
                 with open(self.debug_log_path, "a") as f:
                     f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
 
-                print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+                print(f"\r\033[Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
 
                 # Evaluation
                 correlation = 1.0  # ペナルティ値
@@ -454,7 +454,7 @@ class BaccusOptimizer:
 
         timestamp = time.strftime("%d_%H:%M:%S")
         # 表示を初期化 (行頭に戻り、行末までクリア)
-        print(f"\r\033[K", end='')
+        print(f"\r\033[K", end='\r')
         tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
 
 
