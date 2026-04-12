@@ -63,6 +63,8 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import traceback
 
 import numpy as np
 from scipy.signal import butter, filtfilt
@@ -164,10 +166,12 @@ class OptimizeConfig:
     roi_end: int
     roi_list: str = ""
     data_name: str = "ret2pLimit"
+    max_workers: int = 4
 
 
 def _run_one_baccus(stim: str, resp: str, dt: float, out_dir: Path, objective: str, seed: int, data_name: str) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
+
     cmd = [
         "uv", "run", "python", "src/model/BaccusModel.py",
         f"data.input_file={stim}",
@@ -176,16 +180,72 @@ def _run_one_baccus(stim: str, resp: str, dt: float, out_dir: Path, objective: s
         f"data.dt={dt}",
         f"hyper_params.objective_type={objective}",
         f"optimization.seed={seed}",
+        f"optimization.workers=1",
         f"hydra.run.dir={str(out_dir)}",
     ]
+
     env = os.environ.copy()
     env["PYTHONHASHSEED"] = str(seed)
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("OPENBLAS_NUM_THREADS", "1")
     env.setdefault("MKL_NUM_THREADS", "1")
+    env.setdefault("NUMEXPR_NUM_THREADS", "1")
 
-    print(f"[RUN] seed={seed} objective={objective} out={out_dir}")
-    return subprocess.call(cmd, env=env)
+    stdout_path = out_dir / "stdout.log"
+    stderr_path = out_dir / "stderr.log"
+
+    with open(stdout_path, "w", encoding="utf-8") as f_out, open(stderr_path, "w", encoding="utf-8") as f_err:
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            stdout=f_out,
+            stderr=f_err,
+            text=True,
+        )
+    return proc.returncode
+
+def _run_task(task: Dict[str, object]) -> Dict[str, object]:
+    roi = int(task["roi"])
+    seed = int(task["seed"])
+    stim = str(task["stim"])
+    resp = str(task["resp"])
+    dt = float(task["dt"])
+    out_dir = Path(task["out_dir"])
+    objective = str(task["objective"])
+    data_name = str(task["data_name"])
+
+    try:
+        rc = _run_one_baccus(
+            stim=stim,
+            resp=resp,
+            dt=dt,
+            out_dir=out_dir,
+            objective=objective,
+            seed=seed,
+            data_name=data_name,
+        )
+        score = _find_best_score(out_dir)
+        return {
+            "roi": roi,
+            "seed": seed,
+            "objective": objective,
+            "returncode": rc,
+            "metric": score,
+            "run_dir": str(out_dir),
+            "skipped": False,
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "roi": roi,
+            "seed": seed,
+            "objective": objective,
+            "returncode": -1,
+            "metric": None,
+            "run_dir": str(out_dir),
+            "skipped": False,
+            "error": f"{type(e).__name__}: {e}",
+        }
 
 
 def optimize(cfg: OptimizeConfig) -> Path:
@@ -194,17 +254,17 @@ def optimize(cfg: OptimizeConfig) -> Path:
     out_root.mkdir(parents=True, exist_ok=True)
 
     summary_rows: List[Dict[str, object]] = []
+    pending_tasks: List[Dict[str, object]] = []
 
-    # ROIの回す順番を指定可能にする
-    # - cfg.roi_list が空なら従来通り roi_start..roi_end
-    # - 例: cfg.roi_list="14,9,5" の場合はその順で実行
     if getattr(cfg, "roi_list", "") and str(cfg.roi_list).strip() != "":
         roi_list = [int(x) for x in str(cfg.roi_list).split(",") if str(x).strip() != ""]
     else:
         roi_list = list(range(cfg.roi_start, cfg.roi_end + 1))
 
-    for roi in roi_list:
+    start_seed = max(1, int(cfg.seed_start))
+    end_seed = int(cfg.n_seeds)
 
+    for roi in roi_list:
         resp_path = roi_dir / f"response_ave_roi{roi}.txt"
         if not resp_path.exists():
             print(f"[SKIP] ROI {roi}: not found {resp_path}")
@@ -213,16 +273,9 @@ def optimize(cfg: OptimizeConfig) -> Path:
         roi_out = out_root / f"roi_{roi}" / cfg.objective
         roi_out.mkdir(parents=True, exist_ok=True)
 
-        scores: List[float] = []
-
-        # ★seedは 1..n_seeds の「番号」として扱う（seed_01, seed_02, ...）
-        start_seed = max(1, int(cfg.seed_start))
-        end_seed = int(cfg.n_seeds)
-
         for seed in range(start_seed, end_seed + 1):
             run_out = roi_out / f"seed_{seed:02d}"
 
-            # ★途中再開のため、既にディレクトリがあればスキップ
             if run_out.exists():
                 existing = _find_best_score(run_out)
                 print(f"[SKIP] exists: {run_out} metric={existing}")
@@ -235,31 +288,61 @@ def optimize(cfg: OptimizeConfig) -> Path:
                     "run_dir": str(run_out),
                     "skipped": True,
                 })
-                if existing is not None:
-                    scores.append(float(existing))
                 continue
 
-            rc = _run_one_baccus(cfg.stim, str(resp_path), cfg.dt, run_out, cfg.objective, seed, cfg.data_name)
-            score = _find_best_score(run_out)
-
-            summary_rows.append({
+            pending_tasks.append({
                 "roi": roi,
-                "objective": cfg.objective,
                 "seed": seed,
-                "returncode": rc,
-                "metric": score,
-                "run_dir": str(run_out),
-                "skipped": False,
+                "stim": cfg.stim,
+                "resp": str(resp_path),
+                "dt": cfg.dt,
+                "out_dir": str(run_out),
+                "objective": cfg.objective,
+                "data_name": cfg.data_name,
             })
-            if score is not None:
-                scores.append(float(score))
 
-        # ROIごとの集計（取れた分だけ）
+    total = len(pending_tasks)
+    done = 0
+
+    print(f"[INFO] queued tasks: {total}")
+    print(f"[INFO] max_workers: {cfg.max_workers}")
+
+    with ProcessPoolExecutor(max_workers=cfg.max_workers) as ex:
+        futures = [ex.submit(_run_task, task) for task in pending_tasks]
+
+        for fut in as_completed(futures):
+            row = fut.result()
+            summary_rows.append(row)
+            done += 1
+
+            roi = row["roi"]
+            seed = row["seed"]
+            rc = row["returncode"]
+            metric = row["metric"]
+            err = row.get("error")
+
+            if err is None:
+                print(f"[DONE {done}/{total}] roi={roi} seed={seed} rc={rc} metric={metric}")
+            else:
+                print(f"[FAIL {done}/{total}] roi={roi} seed={seed} err={err}")
+
+    # ROIごとの統計を再集計
+    for roi in roi_list:
+        roi_rows = [
+            r for r in summary_rows
+            if int(r["roi"]) == roi and str(r["objective"]) == cfg.objective and r.get("metric") is not None
+        ]
+        roi_out = out_root / f"roi_{roi}" / cfg.objective
+        roi_out.mkdir(parents=True, exist_ok=True)
+
+        scores = [float(r["metric"]) for r in roi_rows if r["metric"] is not None]
+
         roi_stats: Dict[str, object] = {
             "roi": roi,
             "objective": cfg.objective,
             "note": "No repeats available; noise ceiling is not measured here.",
         }
+
         if scores:
             arr = np.asarray(scores, dtype=float)
             roi_stats.update({
@@ -270,18 +353,26 @@ def optimize(cfg: OptimizeConfig) -> Path:
                 "mean": float(np.mean(arr)),
             })
         else:
-            roi_stats.update({"n_success": 0, "best": None, "p95": None, "median": None, "mean": None})
+            roi_stats.update({
+                "n_success": 0,
+                "best": None,
+                "p95": None,
+                "median": None,
+                "mean": None,
+            })
 
-        (roi_out / "roi_stats.json").write_text(json.dumps(roi_stats, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"[ROI {roi}] stats saved: {roi_out/'roi_stats.json'}")
+        (roi_out / "roi_stats.json").write_text(
+            json.dumps(roi_stats, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
 
     summary_path = out_root / f"summary_{cfg.objective}.jsonl"
     with summary_path.open("w", encoding="utf-8") as f:
         for row in summary_rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
     print(f"[DONE] summary saved: {summary_path}")
     return summary_path
-
 
 # -----------------------------
 # pseudo ceiling（同一細胞グルーピングがある場合のみ）
@@ -387,6 +478,7 @@ def _parse_args():
     p_pc.add_argument("--same-cell-map", required=True, help="2列: roi_index, cell_id")
     p_pc.add_argument("--out", required=True)
     p_pc.add_argument("--order", type=int, default=4)
+    p_opt.add_argument("--max-workers", type=int, default=4, help="Number of parallel runs")
 
 
     return p.parse_args()
@@ -407,6 +499,7 @@ def main():
             roi_end=args.roi_end,
             roi_list=args.roi_list,
             data_name=args.data_name,
+            max_workers=args.max_workers,
         )
         optimize(cfg)
     elif args.cmd == "pseudo_ceiling":

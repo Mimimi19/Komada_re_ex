@@ -13,3 +13,5 @@ python-dotenv
 numba
 requests
 japanize-matplotlib
+traceback
+ProcessPoolExecutor
