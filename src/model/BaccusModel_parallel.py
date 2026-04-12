@@ -1,4 +1,4 @@
-# src/model/BaccusModel.py
+# src/model/BaccusModel_parallel.py
 # -*- coding: utf-8 -*-
 import sys
 import os
@@ -633,7 +633,8 @@ class BaccusOptimizer:
             popsize=opt_cfg.popsize,     # 個体数（探索候補の数）
             strategy=de_strategy_str,  # 差分進化の戦略（mutation の方法）
             workers=opt_cfg.workers,     # 並列実行のためのスレッド・プロセス数
-            callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
+            seed=opt_cfg.get("seed", None), # 乱数シード（再現性のため）
+            callback=self.save_intermediate_results # 各エポックの終わりに呼び出されるコールバック関数
         )
 
         print("\n大域探索 (DE) が完了しました。")

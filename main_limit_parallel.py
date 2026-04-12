@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-main_limit.py (no-repeat version)
+main_limit_parallel.py (no-repeat version)
 
 前提更新:
 - repeat2 のような「同一細胞・同一刺激の繰り返し測定」は存在しない。
@@ -9,7 +9,7 @@ main_limit.py (no-repeat version)
   ファイルとして与えられていない限り、こちらでは同一細胞判定はできない。
 
 本スクリプトの役割:
-- ROI平均(roi_1..14)に対して BaccusModel を繰り返し最適化し、"到達性能の分布" を出す。
+- ROI平均(roi_1..14)に対して BaccusModel_parallel を繰り返し最適化し、"到達性能の分布" を出す。
 - 目的関数を3種類（band_low_only / band_main_only / band_full）に分けて実行できる。
 
 補助:
@@ -166,14 +166,14 @@ class OptimizeConfig:
     roi_end: int
     roi_list: str = ""
     data_name: str = "ret2pLimit"
-    max_workers: int = 4
+    max_workers: int = 6
 
 
 def _run_one_baccus(stim: str, resp: str, dt: float, out_dir: Path, objective: str, seed: int, data_name: str) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        "uv", "run", "python", "src/model/BaccusModel.py",
+        "uv", "run", "python", "src/model/BaccusModel_parallel.py",
         f"data.input_file={stim}",
         f"data.output_file={resp}",
         f"data.name={data_name}",
@@ -511,7 +511,7 @@ if __name__ == "__main__":
     main()
 
 # ----------------------------------------------------------------------
-# 重要: BaccusModel.py 側の注意
+# 重要: BaccusModel_parallel.py 側の注意
 #
 # A) objective_type 3種（band_low_only / band_main_only / band_full）が動く必要あり
 #    → obj_hybrid.calculate(...) の内部で band Spearman を重み付きで使う等。
