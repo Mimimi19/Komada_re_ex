@@ -24,7 +24,7 @@ main_limit_parallel.py (no-repeat version)
 
 実行例:
 1) ROI平均 × 目的関数 band_main_only × seed 30回
-   uv run python main_limit.py optimize \
+   uv run python main_limit_parallel.py optimize \
      --stim data/ret2p/chirp_stim_64Hz_bilinear.txt \
      --dt 0.015625 \
      --roi-ave-dir data/ret2p/roi_ave \
