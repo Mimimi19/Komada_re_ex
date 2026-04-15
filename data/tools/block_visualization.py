@@ -1,5 +1,11 @@
 # data/tools/block_visualization.py
 # -*- coding: utf-8 -*-
+"""
+uv run data/tools/block_visualization.py \
+    --root-dir scripts/limit \
+    --resp-root data/ret2p/roi_ave \
+    --stim data/ret2p/chirp_stim_64Hz_bilinear.txt
+"""
 
 import os
 import argparse

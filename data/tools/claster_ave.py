@@ -6,6 +6,9 @@ import math
 import numpy as np
 from typing import Dict, List, Tuple
 
+"""
+    uv run data/tools/claster_ave.py
+"""
 
 def load_roi_ids(cluster_id_path: str) -> np.ndarray:
     """
@@ -95,8 +98,8 @@ def save_means(means: np.ndarray, roi_ids: List[int], out_dir: str) -> None:
 def main():
     # ========= 入力（必要に応じてここだけ編集） =========
     CLUSTER_ID_PATH = "data/ret2p/cluster_idx.txt"
-    RESPONSE_MAT_PATH = "data/ret2p/response_data_repeat_1.txt"
-    OUT_DIR = "data/ret2p/roi"
+    RESPONSE_MAT_PATH = "data/ret2p/trim/11101x1/response_data_repeat_1.txt"
+    OUT_DIR = "data/ret2p/roi_ave/roi_ave_Block1-2"
     # ================================================
 
     roi_full = load_roi_ids(CLUSTER_ID_PATH)
