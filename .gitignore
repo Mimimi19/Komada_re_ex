@@ -7,3 +7,4 @@ outputs/*
 ca.crt
 # 生データは427.5MBあるので除外
 data/ret2p/response_data_repeat_1.txt 
+data/ret2p/trim/11101x1/*

@@ -4,14 +4,19 @@ from scipy.interpolate import interp1d
 import japanize_matplotlib
 
  # Macの場合の日本語フォント設定例
+"""
+uv run data/ret2p/plot.py \
+    --stim data/ret2p/trim/chirp_stim_64Hz_bilinear.txt \
+    --resp data/ret2p/trim/response_data_64Hz.txt   
+"""
 
 # --- 1. 日本語フォントの設定 ---
 # Windowsなら'MS Gothic', Macなら'Hiragino Sans'などを指定します
 # 環境に合わせて適宜変更してください
 plt.rcParams['font.family'] = 'Hiragino Sans' 
 # --- 2. ファイルとパラメータの設定 ---
-stim_filename = 'data/ret2p/chirp_stim_64Hz_bilinear.txt'
-resp_filename = 'data/ret2p/response_data_64Hz.txt'
+stim_filename = 'data/ret2p/trim/chirp_stim_64Hz_bilinear.txt'
+resp_filename = 'data/ret2p/trim/response_data_64Hz.txt'
 
 # サンプリングレート (Hz)
 # ※データに合わせて変更してください。
