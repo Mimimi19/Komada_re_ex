@@ -17,15 +17,19 @@ cd Re_experiment
 
 #cb1の時
 uv add -r requirements.txt
-uv run src/BaccusModel.py data=Ucb1
+uv run src/model/BaccusModel.py data=Ucb1
 
 #cb2のとき
 uv add -r requirements.txt
-uv run src/BaccusModel.py data=Ucb2
+uv run src/model/BaccusModel.py data=Ucb2
 
 #ret2pのとき
 uv add -r requirements.txt
-uv run src/BaccusModel.py data=ret2p-1
+uv run src/model/BaccusModel.py data=ret2p-1
+
+
+# 基本実行
+uv run python src/model/SegmentLearning.py
 
 #I2を使わない時
 hyper_params.use_I2=false

@@ -1,5 +1,6 @@
-# BaccusModel.py
+# src/model/BaccusModel_parallel.py
 # -*- coding: utf-8 -*-
+import sys
 import os
 import time
 import pprint
@@ -10,9 +11,19 @@ from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import get_original_cwd, to_absolute_path
+from hydra.core.hydra_config import HydraConfig
 import mlflow
 import requests
 from dotenv import load_dotenv
+
+# import sys と import os の直後に配置
+current_dir = os.path.dirname(os.path.abspath(__file__)) # src/model
+src_dir = os.path.dirname(current_dir) # src
+
+# srcディレクトリをパスに追加して components を読み込めるようにする
+if src_dir not in sys.path:
+    sys.path.append(src_dir)
+
 import components.L_LNK as L_LNK
 import components.N_LNK as N_LNK
 import components.K_baccus as K_LNK
@@ -161,10 +172,12 @@ class BaccusOptimizer:
             self.Input = Input_full
             self.Output = Output_full
         
-        base_dir = get_original_cwd()
-        # self.results_dir のパスを修正し、重複した行を削除
-        self.results_dir = os.path.join(base_dir, 'scripts', 'results', f'Baccus_{self.cfg.data.name}', self.date_str)
-        os.makedirs(self.results_dir, exist_ok=True)
+        try:
+            # hydra.run.dir で指定されたパスを確実に取得する
+            self.results_dir = HydraConfig.get().runtime.output_dir
+        except Exception:
+            # 万が一Hydra経由でない場合のフォールバック
+            self.results_dir = os.getcwd()
         print(f"\n結果ファイルは {self.results_dir} に保存されます。")
 
     def _calculate_steady_state(self, a, kappa, b1, b2, ka, kfi, kfr, ksi, ksr):
@@ -215,173 +228,224 @@ class BaccusOptimizer:
         """
         self.total_lnk_model_runs += 1
         try:
-            hp = self.cfg.hyper_params
-            dt = self.cfg.data.dt
-            tau = hp.tau
-            J = self.J
-            
-            # --- パラメータのアンパッキング (順番に注意) ---
-            alphas = x[0:J]
-            delta = x[J]
-            a_nonlinear = x[J+1]
-            kappa_nonlinear = x[J+2]
-            b1_nonlinear = x[J+3]
-            b2_nonlinear = x[J+4]
-            
-            ka_kinetic = x[J+5]
-            kfi_kinetic = x[J+6]
-            kfr_kinetic = x[J+7]
-            ksi_kinetic = x[J+8]
-            ksr_kinetic = x[J+9]
-            # シナプス後電流のパラメータ
-            w_gain = x[J+10]
-            w_decay = x[J+11]
-            
-            # ※ ここで p_R, p_A 等の初期値パラメータのアンパッキングは削除されました
-            
-            if not self.use_I2:
-                ksi_kinetic = 0.0
-                ksr_kinetic = 0.0
+                hp = self.cfg.hyper_params
+                dt = self.cfg.data.dt
+                tau = hp.tau  # 大局（低周波）用
+                tau_short = hp.get('tau_short', None)  # 局所（高周波）用（無ければNone）
+                J = self.J
 
-            # --- 定常状態を計算して初期値とする ---
-            # これにより「平均的な明るさ」に順応した状態からスタートできる
-            R_start, A_start, I1_start, I2_start = self._calculate_steady_state(
-                a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear,
-                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic
-            )
-            
-            # フィルタの有効長 (tau) に必要なポイント数だけを計算します。
-            filter_points = int(tau / dt) + 1  # +1 は余裕を持たせるため
-            
-            # カーネル生成 (長さは filter_points のみ)
-            linear_filter_kernel, _ = L_LNK.main(alphas, delta, filter_points, dt, tau)
-            
-            #畳み込みとサイズ調整
-            g_full = fftconvolve(self.Input, linear_filter_kernel, mode='full')
-            
-            # フィルタによる位相遅れを補正するためのシフト量
-            shift_idx = int(tau / dt) 
-            
-            # データ長に合わせて切り出し
-            if len(g_full) > shift_idx + len(self.Input):
-                g_t = g_full[shift_idx : shift_idx + len(self.Input)]
-            else:
-                # 万が一長さが足りない場合のフォールバック（後ろをゼロ埋めなど）
-                g_t = g_full[:len(self.Input)]
+                # --- パラメータのアンパッキング (順番に注意) ---
+                alphas = x[0:J]
+                delta = x[J]
+                a_nonlinear = x[J+1]
+                kappa_nonlinear = 1.0  # kappa は g の正規化に統一（最適化対象から除外）
+                b1_nonlinear = x[J+2]
+                b2_nonlinear = x[J+3]
 
-            # これがないと g_t が ±100 になり、非線形関数が飽和する
-            g_std = np.std(g_t)
-            if g_std > 1e-9:
-                g_t = g_t / g_std
-                
-            # Nonlinear Model
-            u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
-            # 飽和ペナルティ 
-            # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
-            if np.std(u_t) < 1e-6:  # 閾値は以前より緩和
-                print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
-                return 1.0 # 悪いスコア（相関1.0相当のペナルティ）として返す
-            
-            # Kinetic Model 
-            R_state, A_state, I1_state, I2_state, W_state, check = K_LNK.main(
-                len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
-                ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic, 
-                w_gain, w_decay,
-                label=f"LNK_run {self.total_lnk_model_runs}"
-            )
-            
-            with open(self.debug_log_path, "a") as f:
-                f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
-            
-            print(f"Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+                ka_kinetic = x[J+4]
+                kfi_kinetic = x[J+5]
+                kfr_kinetic = x[J+6]
+                ksi_kinetic = x[J+7]
+                ksr_kinetic = x[J+8]
 
-            # Evaluation
-            correlation = 1.0  # ペナルティ値
-         
-            if check == 1:
-                # 配列長の調整
-                current_len = len(W_state)
-                output_aligned = self.Output[:current_len]
-                
-                #DE_Simulation準拠で、電流Wは負の相関を持つため反転させる
-                model_aligned = -1.0 * W_state 
+                if not self.use_I2:
+                    ksi_kinetic = 0.0
+                    ksr_kinetic = 0.0
 
-                if len(output_aligned) != len(model_aligned):
-                     min_l = min(len(output_aligned), len(model_aligned))
-                     output_aligned = output_aligned[:min_l]
-                     model_aligned = model_aligned[:min_l]
+                # --- 定常状態を計算して初期値とする ---
+                # これにより「平均的な明るさ」に順応した状態からスタートできる
+                R_start, A_start, I1_start, I2_start = self._calculate_steady_state(
+                    a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear,
+                    ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic
+                )
 
-                # マスク処理
-                mask_seconds = 1.0
-                mask_idx = int(mask_seconds / dt)
+                # Linear Model
+                # --- 大局（低周波）用の長窓 ---
+                filter_points = int(tau / dt) + 1  # +1 は余裕を持たせるため
 
-                if mask_idx < len(output_aligned):
-                    # スライスしたデータ同士で相関を計算
-                    output_eval = output_aligned[mask_idx:]
-                    model_eval = model_aligned[mask_idx:]
-                    # --- 目的関数の選択 ---
-                    if self.objective_type == 'hybrid':
-                        # RMSEとピアソン相関のハイブリッド (デフォルト)
-                        # 戻り値は「最小化すべきスコア」
-                        correlation = obj_hybrid.calculate(output_eval, model_eval)
-                    else:
-                        # Spearman順位相関
-                        correlation = obj_spearman.calculate(output_eval, model_eval)
-                        
+                # カーネル生成 (長さは filter_points のみ)
+                linear_filter_kernel, _ = L_LNK.main(alphas, delta, filter_points, dt, tau)
+
+                # 畳み込みとサイズ調整
+                g_full = fftconvolve(self.Input, linear_filter_kernel, mode='full')
+
+                # フィルタによる位相遅れを補正するためのシフト量
+                shift_idx = int(tau / dt)
+
+                # データ長に合わせて切り出し
+                if len(g_full) > shift_idx + len(self.Input):
+                    g_long = g_full[shift_idx : shift_idx + len(self.Input)]
                 else:
-                    correlation = 5.0 # 長さ不足時のペナルティ
-            else:
-                self.failed_lnk_model_runs += 1
-                correlation = 5.0 # 計算失敗時のペナルティ
-            
-            self.current_epoch_best_fun_value = correlation
+                    # 万が一長さが足りない場合のフォールバック（後ろをゼロ埋めなど）
+                    g_long = np.zeros(len(self.Input))
+                    take = max(0, min(len(g_full) - shift_idx, len(self.Input)))
+                    if take > 0:
+                        g_long[:take] = g_full[shift_idx:shift_idx+take]
 
-            if save_states:
-                return correlation, R_state, A_state, I1_state, I2_state, W_state
-            else:
-                return correlation
+                # 正規化（飽和回避）。長窓は大局の形を担う
+                g_long_std = np.std(g_long)
+                if g_long_std > 1e-9:
+                    g_long = g_long / g_long_std
+
+                # --- 局所（高周波）用の短窓（任意） ---
+                # tau_short が設定されている場合のみ、短窓フィルタも同時に使う
+                if tau_short is not None and tau_short > 0:
+
+                    filter_points_s = int(tau_short / dt) + 1
+                    #短窓は点数が少ないので、使える基底数を制限する
+                    J_eff_s = min(len(alphas), filter_points_s)
+                    alphas_s = alphas[:J_eff_s]
+
+                    linear_filter_kernel_s, _ = L_LNK.main(alphas_s, delta, filter_points_s, dt, tau_short)
+
+                    g_full_s = fftconvolve(self.Input, linear_filter_kernel_s, mode='full')
+                    shift_idx_s = int(tau_short / dt)
+
+                    if len(g_full_s) > shift_idx_s + len(self.Input):
+                        g_short = g_full_s[shift_idx_s : shift_idx_s + len(self.Input)]
+                    else:
+                        g_short = np.zeros(len(self.Input))
+                        take_s = max(0, min(len(g_full_s) - shift_idx_s, len(self.Input)))
+                        if take_s > 0:
+                            g_short[:take_s] = g_full_s[shift_idx_s:shift_idx_s+take_s]
+
+                    # 正規化（飽和回避）。短窓は局所の細部を担う
+                    g_short_std = np.std(g_short)
+                    if g_short_std > 1e-9:
+                        g_short = g_short / g_short_std
+
+                    # 合成（最小変更：単純和）
+                    # g_t = g_long + beta_short*g_short # beta_short を導入しても良いが、まずは単純和で試す
+                    g_t = g_long + g_short
+                else:
+                    g_t = g_long
+
+                # これがないと g_t が ±100 になり、非線形関数が飽和する
+                g_std = np.std(g_t)
+                if g_std > 1e-9:
+                    g_t = g_t / g_std
+
+                # Nonlinear Model
+                u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
+                # 飽和ペナルティ
+                # u_t の標準偏差が極端に小さい（平坦）、または値が張り付いている場合にペナルティ
+                if np.std(u_t) < 1e-6:  # 閾値は以前より緩和
+                    print("\033[31mPenalty: Saturation detected\033[0m", end='\r', flush=True)
+                    penalty_val = 10.0 # ペナルティを強化 (1.0 -> 10.0)
+                    if save_states:
+                        return penalty_val, None, None, None, None
+                    return penalty_val
+
+                # Kinetic Model
+                R_state, A_state, I1_state, I2_state, check = K_LNK.main(
+                    len(u_t), u_t, dt, R_start, A_start, I1_start, I2_start,
+                    ka_kinetic, kfi_kinetic, kfr_kinetic, ksi_kinetic, ksr_kinetic,
+                    label=f"LNK_run {self.total_lnk_model_runs}"
+                )
+
+                with open(self.debug_log_path, "a") as f:
+                    f.write(f"Run: {self.total_lnk_model_runs}, Check: {check}\n")
+
+                print(f"\r\033[Check status for LNK model run {self.total_lnk_model_runs}: {check}", end='\r', flush=True)
+
+                # Evaluation
+                correlation = 1.0  # ペナルティ値
+
+                if check == 1:
+                    # 配列長の調整
+                    current_len = len(A_state)
+                    output_aligned = self.Output[:current_len]
+
+                    # 先行研究寄り: A_state を出力として扱う
+                    model_aligned = A_state
+
+                    # スケール差でRMSEが支配されないようにz-score正規化
+                    o_std = np.std(output_aligned)
+                    m_std = np.std(model_aligned)
+                    if o_std > 1e-9:
+                        output_aligned = (output_aligned - np.mean(output_aligned)) / o_std
+                    if m_std > 1e-9:
+                        model_aligned = (model_aligned - np.mean(model_aligned)) / m_std
+                    if len(output_aligned) != len(model_aligned):
+                        min_l = min(len(output_aligned), len(model_aligned))
+                        output_aligned = output_aligned[:min_l]
+                        model_aligned = model_aligned[:min_l]
+
+                    # マスク処理
+                    mask_seconds = 1.0
+                    mask_idx = int(mask_seconds / dt)
+
+                    if mask_idx < len(output_aligned):
+                        # スライスしたデータ同士で相関を計算
+                        output_eval = output_aligned[mask_idx:]
+                        model_eval = model_aligned[mask_idx:]
+                        # --- 目的関数の選択 ---if self.objective_type == "spearman":
+                        correlation = obj_spearman.calculate(output_eval, model_eval)
+                    elif self.objective_type in ("hybrid", "band_low_only", "band_main_only", "band_full"):
+                        correlation = obj_hybrid.calculate(
+                            output_eval,
+                            model_eval,
+                            dt=dt,
+                            objective_mode=self.objective_type,
+                            w_band=1.0,
+                            order=4,
+                        )
+                    else:
+                        raise ValueError(f"Unknown objective_type: {self.objective_type}")
+                        correlation = 5.0 # 長さ不足時のペナルティ
+                else:
+                    self.failed_lnk_model_runs += 1
+                    correlation = 5.0 # 計算失敗時のペナルティ
+
+                self.current_epoch_best_fun_value = correlation
+
+                if save_states:
+                    return correlation, R_state, A_state, I1_state, I2_state
+                else:
+                    return correlation
 
         except Exception as e:
             print(f"エラー内容: {e}")
             import traceback
             traceback.print_exc()
             self.failed_lnk_model_runs += 1
-            return 5.0  # ペナルティ値
-        
+        return 5.0  # ペナルティ値
+
+  
     def save_intermediate_results(self, xk, convergence=None):
         """
         各エポックの終わりに呼び出されるコールバック関数。
         """
-        
+
         self.epoch_counter += 1
-        current_best_correlation_value = -self.lnk_model(xk, save_states=False) 
-        
+        current_best_correlation_value = -self.lnk_model(xk, save_states=False)
+
         intermediate_dir = os.path.join(self.results_dir, 'epochs')
         os.makedirs(intermediate_dir, exist_ok=True)
         save_results(xk, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_params.txt'))
         save_results(current_best_correlation_value, os.path.join(intermediate_dir, f'epoch_{self.epoch_counter:03d}_correlation.txt'))
-        
+
         # 各エポックごとの全パラメータの値をメトリクスとして記録する
-        
+
         intermediate_params = {
             **{f'L{i+1}': xk[i] for i in range(self.J)},
-            'delta': xk[self.J], 'a': xk[self.J+1], 'kappa': xk[self.J+2], 'b1': xk[self.J+3], 'b2': xk[self.J+4],
-            'ka': xk[self.J+5], 'kfi': xk[self.J+6], 'kfr': xk[self.J+7], 'ksi': xk[self.J+8], 'ksr': xk[self.J+9],
-            'w_gain': xk[self.J+10], 'w_decay': xk[self.J+11]
+            'delta': xk[self.J], 'a': xk[self.J+1],
+            'b1': xk[self.J+2], 'b2': xk[self.J+3],
+            'ka': xk[self.J+4], 'kfi': xk[self.J+5], 'kfr': xk[self.J+6], 'ksi': xk[self.J+7], 'ksr': xk[self.J+8],
             # p_R, p_A 等はここには含まれない
         }
 
         # 定常状態として計算された初期値をログ用に計算
         r_calc, a_calc, i1_calc, i2_calc = self._calculate_steady_state(
-            intermediate_params['a'], intermediate_params['kappa'], intermediate_params['b1'], intermediate_params['b2'],
-            intermediate_params['ka'], intermediate_params['kfi'], intermediate_params['kfr'], 
+            intermediate_params['a'], 1.0, intermediate_params['b1'], intermediate_params['b2'],
+            intermediate_params['ka'], intermediate_params['kfi'], intermediate_params['kfr'],
             intermediate_params['ksi'], intermediate_params['ksr']
         )
         intermediate_params['p_R_calc'] = r_calc
         intermediate_params['p_A_calc'] = a_calc
         intermediate_params['p_I1_calc'] = i1_calc
         intermediate_params['p_I2_calc'] = i2_calc
-        
+
         # mlflow.log_metrics を使って辞書の中身を一度に記録
         # keyの先頭に "epoch_" をつけて、最終結果(optimal_)と区別する
         metrics_to_log = {f"epoch_{k}": v for k, v in intermediate_params.items()}
@@ -390,46 +454,48 @@ class BaccusOptimizer:
 
         timestamp = time.strftime("%d_%H:%M:%S")
         # 表示を初期化 (行頭に戻り、行末までクリア)
-        print(f"\r\033[K", end='')
+        print(f"\r\033[K", end='\r')
         tqdm.write(f"---{timestamp} | Epoch {self.epoch_counter:03d} | Corr: {current_best_correlation_value:.4f} ---")
 
-    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state, W_state):
+
+    
+    def save_optimal_results(self, optimal_params, optimal_correlation, R_state, A_state, I1_state, I2_state):
         """
         最終的な最適化結果を保存します。
         """
         print(f"\n最適化結果を {self.results_dir} に保存中...")
         try:
             param_map = {}
-            
+
             # --- 配列から辞書へのマッピング (インデックス管理を安全に) ---
             # lnk_model内の展開順序と厳密に一致させます
             idx = 0
-            
+
             # Linear Filter (L1...LJ)
             for i in range(self.J):
                 param_map[f'L{i+1}'] = optimal_params[idx]
                 idx += 1
-            
+
             # Scalar Parameters
             # 配列のインデックスを順番に進めていくため、記述ミスによるズレを防げます
             # 初期値パラメータはリストから除外
             param_keys = [
-                'delta', 'a', 'kappa', 'b1', 'b2', 
+                'delta', 'a',
+                'b1', 'b2',
                 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-                'w_gain', 'w_decay'
             ]
-            
+
             for key in param_keys:
                 param_map[key] = optimal_params[idx]
                 idx += 1
-                
+
             # 相関係数もマップに追加
             param_map['correlation'] = optimal_correlation
 
             # --- 計算された定常状態（初期状態）の保存 ---
             R_calc, A_calc, I1_calc, I2_calc = self._calculate_steady_state(
-                param_map['a'], param_map['kappa'], param_map['b1'], param_map['b2'],
-                param_map['ka'], param_map['kfi'], param_map['kfr'], 
+                param_map['a'], 1.0, param_map['b1'], param_map['b2'],
+                param_map['ka'], param_map['kfi'], param_map['kfr'],
                 param_map['ksi'], param_map['ksr']
             )
 
@@ -458,18 +524,16 @@ class BaccusOptimizer:
             # --- 時系列状態変数の保存 ---
             state_dir = os.path.join(self.results_dir, 'state')
             os.makedirs(state_dir, exist_ok=True)
-            
+
             save_results(R_state, os.path.join(state_dir, 'R_state.txt'))
             save_results(A_state, os.path.join(state_dir, 'A_state.txt'))
             save_results(I1_state, os.path.join(state_dir, 'I1_state.txt'))
             save_results(I2_state, os.path.join(state_dir, 'I2_state.txt'))
-            save_results(W_state, os.path.join(state_dir, 'W_state.txt'))
-            
             print("すべての保存処理が完了しました。")
-            
+
         except Exception as e:
             print(f"Error saving results: {e}")
-            
+    
     def run(self):
         """
         最適化プロセスを実行します。
@@ -477,29 +541,28 @@ class BaccusOptimizer:
         # ワークステーションでの並列処理の際にNumbaのJITが渋滞する問題を回避するためのウォームアップ
         print("Numba JITコンパイラのウォームアップ中...")
         try:
-            # ダミーのパラメータ配列 (長さ: J + 12) を作成
-            x_dummy = np.ones(self.J + 12) 
+            # ダミーのパラメータ配列 (長さ: J + 9) を作成
+            x_dummy = np.ones(self.J + 9)
             # 目的関数を一度だけ実行して、コンパイルを強制する
             self.lnk_model(x_dummy, save_states=False)
             print("ウォームアップ完了。最適化を開始します。")
         except Exception as e:
             print(f"警告: ウォームアップ中にエラーが発生しました: {e}")
             # エラーが起きても、本番の最適化は続行してみる
-            
+
         # Configからパラメータ境界(param_bounds)を取得
         pb = self.cfg.hyper_params.param_bounds
         J = self.J
-        
+
         # alphas (L1-LJ) の境界を生成
         alpha_bounds_tuple = tuple(pb.LinearFilter.alphas)
         try_bounds = [alpha_bounds_tuple] * J
-        
+
         #Configのリスト [min, max] を tuple(min, max) に変換
         try:
             try_bounds.extend([
                 tuple(pb.LinearFilter.delta),
                 tuple(pb.Nonlinear.a),
-                tuple(pb.Nonlinear.kappa),
                 tuple(pb.Nonlinear.b1),
                 tuple(pb.Nonlinear.b2),
                 tuple(pb.Kinetics.ka),
@@ -507,27 +570,24 @@ class BaccusOptimizer:
                 tuple(pb.Kinetics.kfr),
                 tuple(pb.Kinetics.ksi),
                 tuple(pb.Kinetics.ksr),
-                # ★ 追加されたパラメータの範囲
-                tuple(pb.Kinetics.w_gain),
-                tuple(pb.Kinetics.w_decay),
+                # （シナプス後電流を廃止）
                 # 初期状態 p_R, p_A, p_I1, p_I2 は削除
             ])
         except Exception as e:
             print(f"Config Error: {e}")
             raise
 
-        
+
         #use_I2=False の場合、探索範囲を [0, 0] に固定
         if not self.use_I2:
             print("I2が無効なため、ksi, ksr の探索範囲を [0.0, 0.0] に固定します。")
             # インデックスもずれるので注意: ksrは J+9
-            try_bounds[J + 8] = (0.0, 0.0) # ksi
-            try_bounds[J + 9] = (0.0, 0.0) # ksr
+            try_bounds[J + 7] = (0.0, 0.0) # ksi
+            try_bounds[J + 8] = (0.0, 0.0) # ksr
             # p_I2 の固定処理は不要になりました
 
         param_names = [f'L{i+1}' for i in range(self.J)] + [
-            'delta', 'a', 'kappa', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr',
-            'w_gain', 'w_decay' # p_R, p_A... 削除
+            'delta', 'a', 'b1', 'b2', 'ka', 'kfi', 'kfr', 'ksi', 'ksr'
         ]
 
         #MLflowに記録するための辞書を作成
@@ -536,13 +596,13 @@ class BaccusOptimizer:
             # (下限, 上限) のタプルを文字列に変換して辞書に追加
             # キーの先頭に 'bound_' をつけて、他のパラメータと区別する
             bounds_to_log[f"bound_{name}"] = str(bound_tuple)
-        
+
         # 作成した辞書をに記録
         mlflow.log_params(bounds_to_log)
-        
+
         print(f"Number of parameters to optimize: {len(try_bounds)}")
         print("差分進化法による最適化を開始します...")
-        
+
         opt_cfg = self.cfg.optimization
         # Hydra設定からstrategyコンポーネントを取得
         try:
@@ -552,18 +612,18 @@ class BaccusOptimizer:
             crossover = strategy_cfg.crossover
             # scipy.optimize.differential_evolution が要求する strategy 文字列を組み立てる
             de_strategy_str = f"{mutation}{n_vectors}{crossover}"
-            
+
             # 組み立てた戦略をログに出力
             print(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')")
             with open(self.debug_log_path, "a") as f:
-                    f.write(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')\n")
-                    
+                f.write(f"DE戦略: {mutation}/{n_vectors}/{crossover} (scipy strategy: '{de_strategy_str}')\n")
+
         except Exception as e:
             print(f"エラー: 'optimization.strategy' の設定が不正です。")
             print("config.yaml で mutation, n_vectors, crossover が正しく設定されているか確認してください。")
             print(f"詳細: {e}")
             raise # エラーが発生したら最適化を実行せずに終了
-        
+
         de_result = differential_evolution(
             self.lnk_model,      # 目的関数（最小化したい関数）
             try_bounds,          # 探索するパラメータの範囲（各変数の上下限）
@@ -573,17 +633,18 @@ class BaccusOptimizer:
             popsize=opt_cfg.popsize,     # 個体数（探索候補の数）
             strategy=de_strategy_str,  # 差分進化の戦略（mutation の方法）
             workers=opt_cfg.workers,     # 並列実行のためのスレッド・プロセス数
-            callback=self.save_intermediate_results  # 各イテレーション後に呼ばれる関数
+            seed=opt_cfg.get("seed", None), # 乱数シード（再現性のため）
+            callback=self.save_intermediate_results # 各エポックの終わりに呼び出されるコールバック関数
         )
 
         print("\n大域探索 (DE) が完了しました。")
         print(f"DE 最良スコア: {-de_result.fun:.6f}")
         print("最適な結果を初期値として局所探索 (Powell) を開始します... (Phase 2: Refinement)")
-        
+
         #局所探索 (Powell)
         # config.yaml に local_maxiter を追加するか、ここではDEのイテレーション数を流用
-        local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2) 
-        result = minimize(
+        local_maxiter = opt_cfg.get('local_maxiter', opt_cfg.maxiter // 2)
+        powell_result =minimize(
             self.lnk_model,          # 目的関数
             de_result.x,             # DEで見つけた最適解を初期値 (x0) に設定
             method='Powell',         # 微分不要で高速な局所探索手法
@@ -593,14 +654,25 @@ class BaccusOptimizer:
                 'maxiter': local_maxiter # 局所探索用のイテレーション数
             }
         )
+        
+        print("\nPowell 法による局所探索が完了しました。")
+        pprint.pprint(powell_result)
+        
+        if powell_result.fun <= de_result.fun:
+            print("Powell 結果の方が良かったため、これを最終解として採用します。")
+            final_result = powell_result
+        else:
+            print("Powell で目的関数が悪化したため、DE の解を最終解として採用します。")
+            final_result = de_result
+
 
         print("\nハイブリッド最適化が完了しました。")
-        pprint.pprint(result)
-        
+        pprint.pprint(final_result)
+
         print("\n--- 検証統計 ---")
         # 成功した実行回数を計算
         successful_runs = self.total_lnk_model_runs - self.failed_lnk_model_runs
-        
+
         # 成功率を計算 (ゼロ除算を回避)
         if self.total_lnk_model_runs > 0:
             success_rate = (successful_runs / self.total_lnk_model_runs) * 100.0
@@ -612,32 +684,31 @@ class BaccusOptimizer:
         print(f"成功回数 (check=1): {successful_runs}")
         print(f"失敗回数 (check=0 or Error): {self.failed_lnk_model_runs}")
         print(f"成功率: {success_rate:.2f}%")
-        
+
         # MLflowにメトリクスとして保存
         mlflow.log_metric("final_total_runs", self.total_lnk_model_runs)
         mlflow.log_metric("final_successful_runs", successful_runs)
         mlflow.log_metric("final_success_rate_percent", success_rate)
-        
+
         print("検証統計をMLflowに保存しました。")
-        
-        optimal_params = result.x
-        optimal_correlation = -result.fun
+
+        optimal_params = final_result.x
+        optimal_correlation = -final_result.fun
 
         # 戻り値受け取り変更
         res_tuple = self.lnk_model(optimal_params, save_states=True)
-        # res_tuple: (corr, R, A, I1, I2, W)
-        
-        if len(res_tuple) == 6:
-            _, r_final, a_final, i1_final, i2_final, w_final = res_tuple
-            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final, w_final)
+
+        if isinstance(res_tuple, tuple) and len(res_tuple) == 5:
+            _, r_final, a_final, i1_final, i2_final = res_tuple
+            self.save_optimal_results(optimal_params, optimal_correlation, r_final, a_final, i1_final, i2_final)
             mlflow.log_artifacts(self.results_dir, artifact_path="results")
         else:
             print("Kineticモデルが最終実行で失敗したため、状態は保存されません。")
             print(f"最終的な相関係数: {optimal_correlation:.4f}")
-            # 失敗した場合でも、最終的な相関係数だけは記録しておく
             mlflow.log_metric("final_correlation_on_failure", optimal_correlation)
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+
+@hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(cfg: DictConfig):
     """
     Hydraによって呼び出されるメイン関数。

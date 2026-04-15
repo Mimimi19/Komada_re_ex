@@ -37,7 +37,7 @@ def error_function(x_input, a, kappa, b1, b2, ka):
 
 def main(x_input, a, kappa, b1, b2, ka):
     
-    # print(f"             - Nonlinear Model -                is being processed.", end='\r', flush=True)
+    # print(f"\r\033[             - Nonlinear Model -                is being processed.", end='\r', flush=True)
     
     return error_function(x_input, a, kappa, b1, b2, ka)
 
