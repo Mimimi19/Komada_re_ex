@@ -9,6 +9,11 @@ src/tools/boxplot_compare.py
     uv run python src/tools/boxplot_compare.py \
         --base scripts/limit \
         --roi "1,2,13,14"
+        
+        
+    uv run python src/tools/boxplot_compare.py \
+        --base scripts/spring04/scripts/limit\
+        --roi "1,2,3,4,5,6,7,8,9,10,11,12,13,14" \
 """
 
 import os
@@ -151,7 +156,7 @@ def main():
         [], [], marker="o", color="black", linestyle="None",
         markerfacecolor="white", markersize=6, label="外れ値 (outlier)"
     )
-    ax.legend(handles=[mean_proxy, outlier_proxy], loc="lower left", fontsize=10)
+    ax.legend(handles=[mean_proxy, outlier_proxy], loc="upper left", fontsize=10)
     ax.tick_params(labelsize=10)
 
     pdf_name = "compare_roi_" + "_".join([str(r) for r in roi_list]) + ".pdf"

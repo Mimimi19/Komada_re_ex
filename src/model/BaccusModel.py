@@ -238,7 +238,7 @@ class BaccusOptimizer:
                 alphas = x[0:J]
                 delta = x[J]
                 a_nonlinear = x[J+1]
-                kappa_nonlinear = 1.0  # kappa は g の正規化に統一（最適化対象から除外）
+                kappa_nonlinear = 1.0  # kappa 初期化は1.0でのちにgの分散の逆数とするため、最適化対象からは外す（固定）
                 b1_nonlinear = x[J+2]
                 b2_nonlinear = x[J+3]
 
@@ -282,48 +282,13 @@ class BaccusOptimizer:
                     if take > 0:
                         g_long[:take] = g_full[shift_idx:shift_idx+take]
 
-                # 正規化（飽和回避）。長窓は大局の形を担う
-                g_long_std = np.std(g_long)
-                if g_long_std > 1e-9:
-                    g_long = g_long / g_long_std
 
-                # --- 局所（高周波）用の短窓（任意） ---
-                # tau_short が設定されている場合のみ、短窓フィルタも同時に使う
-                if tau_short is not None and tau_short > 0:
-
-                    filter_points_s = int(tau_short / dt) + 1
-                    #短窓は点数が少ないので、使える基底数を制限する
-                    J_eff_s = min(len(alphas), filter_points_s)
-                    alphas_s = alphas[:J_eff_s]
-
-                    linear_filter_kernel_s, _ = L_LNK.main(alphas_s, delta, filter_points_s, dt, tau_short)
-
-                    g_full_s = fftconvolve(self.Input, linear_filter_kernel_s, mode='full')
-                    shift_idx_s = int(tau_short / dt)
-
-                    if len(g_full_s) > shift_idx_s + len(self.Input):
-                        g_short = g_full_s[shift_idx_s : shift_idx_s + len(self.Input)]
-                    else:
-                        g_short = np.zeros(len(self.Input))
-                        take_s = max(0, min(len(g_full_s) - shift_idx_s, len(self.Input)))
-                        if take_s > 0:
-                            g_short[:take_s] = g_full_s[shift_idx_s:shift_idx_s+take_s]
-
-                    # 正規化（飽和回避）。短窓は局所の細部を担う
-                    g_short_std = np.std(g_short)
-                    if g_short_std > 1e-9:
-                        g_short = g_short / g_short_std
-
-                    # 合成（最小変更：単純和）
-                    # g_t = g_long + beta_short*g_short # beta_short を導入しても良いが、まずは単純和で試す
-                    g_t = g_long + g_short
-                else:
-                    g_t = g_long
-
+                g_t = g_long
                 # これがないと g_t が ±100 になり、非線形関数が飽和する
-                g_std = np.std(g_t)
-                if g_std > 1e-9:
-                    g_t = g_t / g_std
+                g_var = np.var(g_t)
+                
+                kappa_nonlinear = 1.0 / (g_var + 1e-9)  # gの分散の逆数をkappaに設定（飽和回避のためのスケーリング）
+
 
                 # Nonlinear Model
                 u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
