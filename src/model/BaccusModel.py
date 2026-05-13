@@ -285,11 +285,18 @@ class BaccusOptimizer:
 
                 g_t = g_long
                 # これがないと g_t が ±100 になり、非線形関数が飽和する
+                """ 
+                # こっちの方が先行研究的には正しいが性能が悪化するため、今回はあらかじめ標準偏差でスケーリングする方法を採用する。
+                
                 g_var = np.var(g_t)
                 
                 kappa_nonlinear = 1.0 / (g_var + 1e-9)  # gの分散の逆数をkappaに設定（飽和回避のためのスケーリング）
-
-
+                """
+                
+                g_std = np.std(g_t)
+                if g_std > 1e-9:
+                    g_t = g_t / g_std
+               
                 # Nonlinear Model
                 u_t = N_LNK.main(g_t, a_nonlinear, kappa_nonlinear, b1_nonlinear, b2_nonlinear, ka_kinetic)
                 # 飽和ペナルティ
