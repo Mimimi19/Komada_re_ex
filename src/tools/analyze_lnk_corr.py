@@ -1,4 +1,17 @@
 # src/tools/analyze_lnk_corr.py
+
+
+'''
+LNK の Spearman 相関のブロックごとの分布を、ROIグループ間で比較するツール。
+具体的には、Mann–Whitney U 検定を行い、p値と Cliff's delta を出力する。
+実行例:
+    uv run python src/tools/analyze_lnk_corr.py \
+        "1,2,3,4,5,6" \
+        "14,13,12" \
+        --base-dir scripts/limit/block_corr
+            
+'''
+
 import argparse
 import pathlib
 import re

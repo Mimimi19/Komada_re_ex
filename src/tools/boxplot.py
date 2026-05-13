@@ -25,7 +25,7 @@ src/tools/boxplot.py
   uv run python src/tools/boxplot.py
 
   # root を変えたい場合
-  uv run python src/tools/boxplot.py --root scripts/limit
+  uv run python src/tools/boxplot.py --root scripts/spring04/scripts/limit
 """
 import os
 import argparse

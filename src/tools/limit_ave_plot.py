@@ -33,10 +33,10 @@
 
 使い方:
     # ROI 1〜14 をまとめて処理
-    uv run python src/tools/limit_ave_plot.py scripts/limit
+    uv run python src/tools/limit_ave_plot.py scripts/spring04/scripts/limit 
 
     # 特定 ROI だけ処理
-    uv run python src/tools/limit_ave_plot.py scripts/limit --roi 11
+    uv run python src/tools/limit_ave_plot.py scripts/spring04/scripts/limit --roi 11
 
     # 目的関数ディレクトリを変える場合
     uv run python src/tools/limit_ave_plot.py scripts/limit --objective band_low_only

@@ -149,12 +149,35 @@ def plot_kernel_overlay(seed_data,delays,out_path,title):
             handles.append(line[0])
 
     ax.set_title(title)
-    ax.set_xlabel("delay (s)")
-    ax.set_ylabel("kernel amplitude")
+    ax.set_xlabel("Temporal lag (s)")
+    ax.set_ylabel("Linear filter amplitude")
     ax.grid(True)
 
     if handles:
         ax.legend(handles=handles,fontsize=8,loc="upper left",bbox_to_anchor=(1.02,1))
+
+    fig.tight_layout()
+    fig.savefig(out_path,bbox_inches="tight")
+    plt.close(fig)
+    
+def plot_kernel_best(best,delays,out_path,title):
+
+    fig,ax=plt.subplots(figsize=(4,3))
+
+    k=best["kernel"]
+
+    ax.plot(
+        delays[:len(k)],
+        k,
+        lw=3,
+        color="black"
+    )
+
+    ax.set_title(title + f"  (seed {best['seed']} corr={best['corr']:.3f})")
+    ax.set_xlabel("Temporal lag (s)")
+    ax.set_ylabel("Linear filter amplitude")
+
+    ax.grid(True)
 
     fig.tight_layout()
     fig.savefig(out_path,bbox_inches="tight")
@@ -212,6 +235,33 @@ def plot_nonlinear(seed_data,out_path,title,max_points):
     fig.savefig(out_path,bbox_inches="tight")
     plt.close(fig)
 
+def plot_nonlinear_best(best,out_path,title,max_points):
+
+    fig,ax=plt.subplots(figsize=(4,3))
+
+    g=best["g"]
+    u=best["u"]
+
+    n=min(len(g),len(u))
+
+    g=g[:n]
+    u=u[:n]
+
+    if n>max_points:
+        idx=RNG.choice(n,max_points,replace=False)
+        g=g[idx]
+        u=u[idx]
+
+    ax.scatter(g,u,s=6,alpha=0.6,color="black")
+
+    ax.set_title(title + f"  (seed {best['seed']} corr={best['corr']:.3f})")
+    ax.set_xlabel("g(t)")
+    ax.set_ylabel("u(t)")
+    ax.grid(True)
+
+    fig.tight_layout()
+    fig.savefig(out_path,bbox_inches="tight")
+    plt.close(fig)
 # ==========================================================
 # core
 # ==========================================================
@@ -295,6 +345,7 @@ def run_for_roi(base_dir,tau_list,max_points,roi):
         return
 
     seed_data = sorted(seed_data,key=lambda x:x["corr"])
+    best = seed_data[-1]
 
     out_dir=os.path.join(base_dir,"filter_plot")
     os.makedirs(out_dir,exist_ok=True)
@@ -321,6 +372,24 @@ def run_for_roi(base_dir,tau_list,max_points,roi):
         max_points
     )
 
+
+    # best kernel
+
+    plot_kernel_best(
+        best,
+        delays,
+        os.path.join(out_dir,"best_linear_filter_kernel.pdf"),
+        f"Best Linear filter {roi_label}"
+    )
+
+    # best nonlinear
+
+    plot_nonlinear_best(
+        best,
+        os.path.join(out_dir,"best_nonlinear_g_vs_u.pdf"),
+        f"Best Nonlinear {roi_label}",
+        max_points
+    )
 
 # ==========================================================
 # main

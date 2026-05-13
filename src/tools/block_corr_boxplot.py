@@ -44,7 +44,7 @@ ROI ごとに箱ひげ図を出力する。
     ※ ALL ブロックは ROI 間比較図は作らない（要望通り ALL 以外のみ）
 
 使い方:
-    uv run python src/tools/block_corr_boxplot.py scripts/limit
+    uv run python src/tools/block_corr_boxplot.py scripts/spring04/scripts/limit 
 
 オプション:
     --objective  : band_full 以外の目的関数ディレクトリを使いたい場合

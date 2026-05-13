@@ -30,6 +30,44 @@ except ImportError:
     pass
 
 
+
+# ==========================================================
+# ROI → ラベル（グラフタイトルなどに使う）
+# ==========================================================
+# ROI_LABELS = {
+#     1:  "ROI 1  CBC1 (OFF)",
+#     2:  "ROI 2  CBC2 (OFF)",
+#     3:  "ROI 3  CBC3a (OFF)",
+#     4:  "ROI 4  CBC3b (OFF)",
+#     5:  "ROI 5  CBC4 (OFF)",
+#     6:  "ROI 6  CBC5t (ON)",
+#     7:  "ROI 7  CBC5o (ON)",
+#     8:  "ROI 8  CBC5i (ON)",
+#     9:  "ROI 9  CBCX (ON)",
+#     10: "ROI10 CBC6 (ON)",
+#     11: "ROI11 CBC7 (ON)",
+#     12: "ROI12 CBC8 (ON)",
+#     13: "ROI13 CBC9 (ON)",
+#     14: "ROI14 RBC (ON)",
+# }
+
+ROI_LABELS = {
+    1:  "CBC1 (OFF)",
+    2:  "CBC2 (OFF)",
+    3:  "CBC3a (OFF)",
+    4:  "CBC3b (OFF)",
+    5:  "CBC4 (OFF)",
+    6:  "CBC5t (ON)",
+    7:  "CBC5o (ON)",
+    8:  "CBC5i (ON)",
+    9:  "CBCX (ON)",
+    10: "CBC6 (ON)",
+    11: "CBC7 (ON)",
+    12: "CBC8 (ON)",
+    13: "CBC9 (ON)",
+    14: "RBC (ON)",
+}
+
 # -------------------------------
 # correlation.txt の読み込み
 # -------------------------------
@@ -121,12 +159,7 @@ def main():
 
         corr, seeds_ok, seeds_err = read_roi_correlations(path)
         roi_corrs.append(corr)
-        if roi <= 5:
-            roi_labels.append(f"ROI {roi}(OFF)")
-        elif roi >= 14:
-            roi_labels.append(f"ROI {roi}(RBC)")
-        else:
-            roi_labels.append(f"ROI {roi}(ON)")
+        roi_labels.append(ROI_LABELS.get(roi, f"ROI {roi}"))
         roi_errs[roi] = seeds_err
 
         print(f"[OK] ROI {roi}: {len(corr)} values, {len(seeds_err)} errors")
@@ -143,18 +176,18 @@ def main():
 
     # showmeans=True なので「緑三角 = 平均」「白丸 = 外れ値」が描かれる
     bp = ax.boxplot(roi_corrs, labels=roi_labels, showmeans=True, vert=False)
-    ax.set_title(f"ROI 毎の相関係数の分布", fontsize=14)
-    ax.set_xlabel("相関係数")
+    ax.set_title(f"Distribution of Post-optimization Correlation Coefficients Across BC Subtypes", fontsize=14)
+    ax.set_xlabel("spearman correlation", fontsize=12)
     ax.grid(True, linestyle="--", alpha=0.3)
 
     # --- 凡例（緑三角=平均, 白丸=外れ値）を明示 ---
     mean_proxy = Line2D(
         [], [], marker="^", color="green", linestyle="None",
-        markersize=8, label="平均値 (mean)"
+        markersize=8, label="mean"
     )
     outlier_proxy = Line2D(
         [], [], marker="o", color="black", linestyle="None",
-        markerfacecolor="white", markersize=6, label="外れ値 (outlier)"
+        markerfacecolor="white", markersize=6, label="outlier"
     )
     ax.legend(handles=[mean_proxy, outlier_proxy], loc="upper left", fontsize=10)
     ax.tick_params(labelsize=10)

@@ -8,6 +8,14 @@ from scipy.stats import spearmanr
 import glob
 import re
 
+'''
+BaccusModel.py の学習結果から、予測応答と実測応答を比較するプロットを作るツール。
+実行例:
+    uv run python src/plot_results.py \
+        scripts/ret2p/20251218_1906/1_segment \
+        config/data/ret2p-1.yaml
+'''
+
 # 日本語フォント対応
 try:
     import japanize_matplotlib
@@ -344,12 +352,12 @@ if __name__ == "__main__":
     
     # 1. データ設定ファイル (.yaml) のパス
     # TARGET_CONFIG = "config/data/Ucb1.yaml"
-    TARGET_CONFIG = "config/data/Ucb2.yaml"
-    # TARGET_CONFIG = "config/data/ret2p-1.yaml"
+    # TARGET_CONFIG = "config/data/Ucb2.yaml"
+    TARGET_CONFIG = "config/data/ret2p-1.yaml"
     
     # 2. 学習結果が保存されているディレクトリ
     # TARGET_DIR = "scripts/cb1/20251218_1012"
-    TARGET_DIR = "scripts/ret2p/20251218_1906/1_segment"
+    TARGET_DIR = "scripts/spring04/scripts/limit/band_full/roi_1/ "
     # TARGET_DIR = "scripts/ret2p/20251217_23"
     
     # 3. 時定数 (Tau)

@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+'''
+Powell法とDE法の結果を比較し、失敗したseedをリストアップする
+使い方:
+    uv run python src/tools/check_powell_fail.py scripts/limit_full/roi_1
+'''
+
 import os
 import glob
 

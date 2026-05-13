@@ -20,10 +20,10 @@
 
 実行例:
     # ROI 1〜14 を全部処理（推奨）
-    uv run python src/tools/state_plot.py scripts/limit
+    uv run python src/tools/state_plot.py scripts/spring04/scripts/limit 
 
     # 特定 ROI だけ処理したい場合
-    uv run python src/tools/state_plot.py scripts/limit --roi 11
+    uv run python src/tools/state_plot.py  scripts/spring04/scripts/limit  --roi 10
 """
 
 import os
