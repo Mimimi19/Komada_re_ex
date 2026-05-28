@@ -57,21 +57,37 @@ except ImportError:
 # ----------------------------------------------------------
 # ROI → ラベル
 # ----------------------------------------------------------
+# ROI_LABELS = {
+#     1:  "ROI 1  CBC1 (OFF)",
+#     2:  "ROI 2  CBC2 (OFF)",
+#     3:  "ROI 3  CBC3a (OFF)",
+#     4:  "ROI 4  CBC3b (OFF)",
+#     5:  "ROI 5  CBC4 (OFF)",
+#     6:  "ROI 6  CBC5t (ON)",
+#     7:  "ROI 7  CBC5o (ON)",
+#     8:  "ROI 8  CBC5i (ON)",
+#     9:  "ROI 9  CBCX (ON)",
+#     10: "ROI10 CBC6 (ON)",
+#     11: "ROI11 CBC7 (ON)",
+#     12: "ROI12 CBC8 (ON)",
+#     13: "ROI13 CBC9 (ON)",
+#     14: "ROI14 RBC (ON)",
+# }
 ROI_LABELS = {
-    1:  "ROI 1  CBC1 (OFF)",
-    2:  "ROI 2  CBC2 (OFF)",
-    3:  "ROI 3  CBC3a (OFF)",
-    4:  "ROI 4  CBC3b (OFF)",
-    5:  "ROI 5  CBC4 (OFF)",
-    6:  "ROI 6  CBC5t (ON)",
-    7:  "ROI 7  CBC5o (ON)",
-    8:  "ROI 8  CBC5i (ON)",
-    9:  "ROI 9  CBCX (ON)",
-    10: "ROI10 CBC6 (ON)",
-    11: "ROI11 CBC7 (ON)",
-    12: "ROI12 CBC8 (ON)",
-    13: "ROI13 CBC9 (ON)",
-    14: "ROI14 RBC (ON)",
+    1:  "CBC1 (OFF)",
+    2:  "CBC2 (OFF)",
+    3:  "CBC3a (OFF)",
+    4:  "CBC3b (OFF)",
+    5:  "CBC4 (OFF)",
+    6:  "CBC5t (ON)",
+    7:  "CBC5o (ON)",
+    8:  "CBC5i (ON)",
+    9:  "CBCX (ON)",
+    10: "CBC6 (ON)",
+    11: "CBC7 (ON)",
+    12: "CBC8 (ON)",
+    13: "CBC9 (ON)",
+    14: "RBC (ON)",
 }
 
 
@@ -168,14 +184,15 @@ def _plot_all_seeds(resp_n, preds_n, t, out_path: str, roi_label: str):
     # 予測平均
     if preds_n:
         mean_pred = np.mean(np.stack(preds_n, axis=0), axis=0)
-        ax.plot(t, mean_pred, color="tab:red", linewidth=1.8, label="予測平均 (A_state)")
+        ax.plot(t, mean_pred, color="tab:red", linewidth=1.8, label="Mean A_state")
 
     # 教師データ
-    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="教師データ (ROI 平均応答)")
+    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="BC response")
 
-    ax.set_title(f"LNKモデルの予測応答とROIごとの平均応答 (全 seed) - {roi_label}")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Normalized response")
+    # ax.set_title(f"LNKモデルの予測応答とROIごとの平均応答 (全 seed) - {roi_label}", fontsize=18)
+    ax.set_title(f" LNK Model Predictions and Subtype Averaged Responses - {roi_label}", fontsize=18)    
+    ax.set_xlabel("Time (s)", fontsize=14)
+    ax.set_ylabel("Normalized response", fontsize=14)
     ax.grid(True, linestyle="--", alpha=0.3)
     ax.legend(loc="upper right", fontsize=9)
     ax.tick_params(labelsize=10)
@@ -190,10 +207,10 @@ def _plot_best_seed(resp_n, best_pred, t, out_path: str, roi_label: str, best_se
 
     # ベスト seed の A_state
     ax.plot(t, best_pred, color="tab:green", linewidth=1.8,
-            label=f"Best seed (A_state)")
+            label=f"A_state (Best seed )")
 
     # 教師データ
-    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="教師データ (ROI 平均応答)")
+    ax.plot(t, resp_n, color="tab:blue", linewidth=1.5, label="BC response")
 
     title_extra = ""
     if best_seed is not None:
@@ -204,13 +221,13 @@ def _plot_best_seed(resp_n, best_pred, t, out_path: str, roi_label: str, best_se
         title_extra += f"corr={best_corr:.3f}"
 
     if title_extra:
-        title = f"LNK A_state vs ROI 平均応答 (best) - {roi_label}\n({title_extra})"
+        title = f"LNK A_state (best seed) vs BC Responses - {roi_label}\n({title_extra})"
     else:
-        title = f"LNK A_state vs ROI 平均応答 (best) - {roi_label}"
+        title = f"LNK A_state (best seed) vs BC Responses - {roi_label}"
 
-    ax.set_title(title)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Normalized response")
+    ax.set_title(title, fontsize=18)
+    ax.set_xlabel("Time (s)", fontsize=14)
+    ax.set_ylabel("Normalized response", fontsize=14)
     ax.grid(True, linestyle="--", alpha=0.3)
     ax.legend(loc="upper right", fontsize=9)
     ax.tick_params(labelsize=10)

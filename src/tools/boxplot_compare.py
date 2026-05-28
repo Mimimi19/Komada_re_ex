@@ -13,7 +13,7 @@ src/tools/boxplot_compare.py
         
     uv run python src/tools/boxplot_compare.py \
         --base scripts/spring04/scripts/limit\
-        --roi "1,2,3,4,5,6,7,8,9,10,11,12,13,14" \
+        --roi "1,2,3,4,5,6,7,8,9,10,11,12,13,14" 
 """
 
 import os
@@ -176,8 +176,8 @@ def main():
 
     # showmeans=True なので「緑三角 = 平均」「白丸 = 外れ値」が描かれる
     bp = ax.boxplot(roi_corrs, labels=roi_labels, showmeans=True, vert=False)
-    ax.set_title(f"Distribution of Post-optimization Correlation Coefficients Across BC Subtypes", fontsize=14)
-    ax.set_xlabel("spearman correlation", fontsize=12)
+    ax.set_title(f"Distribution of Post-optimization Correlation Coefficients Across BC Subtypes", fontsize=18)
+    ax.set_xlabel("spearman correlation", fontsize=14)
     ax.grid(True, linestyle="--", alpha=0.3)
 
     # --- 凡例（緑三角=平均, 白丸=外れ値）を明示 ---
